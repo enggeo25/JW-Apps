@@ -1,18 +1,27 @@
 Attribute VB_Name = "modTPLogger"
 Option Explicit
 
+Private Const SH_PROJECT As String = "ProjectInfo"
+Private Const SH_INDEX As String = "Index"
+Private Const SH_TEMPLATE As String = "TP_Template"
+Private Const SH_SAMPLES As String = "Samples"
+Private Const SH_SUMMARY As String = "Summary"
+Private Const SH_XS As String = "CrossSectionData"
+Private Const SH_EXPORT As String = "Export_All"
+Private Const SH_LOOKUPS As String = "LookupTables"
+
 Public Sub CreateNewTestPitSheet()
     Dim wsTemplate As Worksheet
     Dim wsIndex As Worksheet
-    Dim newName As String
     Dim wsNew As Worksheet
+    Dim newName As String
     Dim nextRow As Long
 
-    Set wsTemplate = ThisWorkbook.Worksheets("TP_Template")
-    Set wsIndex = ThisWorkbook.Worksheets("Index")
+    Set wsTemplate = ThisWorkbook.Worksheets(SH_TEMPLATE)
+    Set wsIndex = ThisWorkbook.Worksheets(SH_INDEX)
 
-    newName = InputBox("Enter new sheet name, e.g. TP01", "Create New Test Pit")
-    If Trim$(newName) = "" Then Exit Sub
+    newName = Trim$(InputBox("Enter new sheet name, e.g. TP01", "Create New Test Pit"))
+    If newName = "" Then Exit Sub
 
     If WorksheetExists(newName) Then
         MsgBox "Sheet already exists: " & newName, vbExclamation
@@ -25,21 +34,54 @@ Public Sub CreateNewTestPitSheet()
     wsNew.Name = newName
     wsTemplate.Visible = xlSheetVeryHidden
 
-    wsNew.Range("B4").Value = "TP"
-    wsNew.Range("B5").Value = newName
-    wsNew.Range("B6").Value = ThisWorkbook.Worksheets("ProjectInfo").Range("B3").Value
-    wsNew.Range("B15").Value = ThisWorkbook.Worksheets("ProjectInfo").Range("B10").Value
+    ApplyTemplateUsability wsNew
+    PopulateProjectDefaults wsNew, newName
 
-    nextRow = wsIndex.Cells(wsIndex.Rows.Count, 1).End(xlUp).Row + 1
-    If nextRow < 4 Then nextRow = 4
-
+    nextRow = NextIndexRow(wsIndex)
     wsIndex.Cells(nextRow, 1).Value = nextRow - 3
-    wsIndex.Cells(nextRow, 2).Value = "TP"
-    wsIndex.Cells(nextRow, 3).Value = newName
-    wsIndex.Cells(nextRow, 4).Value = newName
+    wsIndex.Cells(nextRow, 2).Value = Nz(wsNew.Range("B4").Value)
+    wsIndex.Cells(nextRow, 3).Value = wsNew.Name
+    wsIndex.Cells(nextRow, 4).Value = Nz(wsNew.Range("B5").Value)
     wsIndex.Cells(nextRow, 14).Value = "Draft"
 
     MsgBox "Created new sheet: " & newName, vbInformation
+End Sub
+
+Public Sub RefreshCurrentSheet()
+    Dim ws As Worksheet
+    Set ws = ActiveSheet
+
+    If Not IsPointSheet(ws) Then
+        MsgBox "Active sheet is not a pit / borehole sheet.", vbExclamation
+        Exit Sub
+    End If
+
+    ApplyTemplateUsability ws
+    AutoCalculateLayerFields ws
+    BuildLayerPreviews ws
+    HighlightValidation ws
+    RefreshIndexFromSheets
+    RebuildSamples
+    MsgBox ws.Name & " refreshed.", vbInformation
+End Sub
+
+Public Sub RefreshAll()
+    Dim ws As Worksheet
+
+    For Each ws In ThisWorkbook.Worksheets
+        If IsPointSheet(ws) Then
+            ApplyTemplateUsability ws
+            AutoCalculateLayerFields ws
+            BuildLayerPreviews ws
+            HighlightValidation ws
+        End If
+    Next ws
+
+    RefreshIndexFromSheets
+    RebuildSamples
+    BuildCrossSectionData
+    BuildCombinedExportPreview
+    MsgBox "All point sheets refreshed.", vbInformation
 End Sub
 
 Public Sub RefreshIndexFromSheets()
@@ -47,15 +89,12 @@ Public Sub RefreshIndexFromSheets()
     Dim ws As Worksheet
     Dim nextRow As Long
 
-    Set wsIndex = ThisWorkbook.Worksheets("Index")
+    Set wsIndex = ThisWorkbook.Worksheets(SH_INDEX)
     wsIndex.Range("A4:N1000").ClearContents
     nextRow = 4
 
     For Each ws In ThisWorkbook.Worksheets
-        If ws.Name <> "ProjectInfo" And ws.Name <> "Index" And ws.Name <> "TP_Template" _
-           And ws.Name <> "LookupTables" And ws.Name <> "Samples" And ws.Name <> "Summary" _
-           And ws.Name <> "CrossSectionData" And ws.Name <> "Export_All" Then
-
+        If IsPointSheet(ws) Then
             wsIndex.Cells(nextRow, 1).Value = nextRow - 3
             wsIndex.Cells(nextRow, 2).Value = Nz(ws.Range("B4").Value)
             wsIndex.Cells(nextRow, 3).Value = ws.Name
@@ -73,8 +112,6 @@ Public Sub RefreshIndexFromSheets()
             nextRow = nextRow + 1
         End If
     Next ws
-
-    MsgBox "Index refreshed.", vbInformation
 End Sub
 
 Public Sub RebuildSamples()
@@ -82,7 +119,7 @@ Public Sub RebuildSamples()
     Dim ws As Worksheet
     Dim r As Long, outRow As Long
 
-    Set wsSamples = ThisWorkbook.Worksheets("Samples")
+    Set wsSamples = ThisWorkbook.Worksheets(SH_SAMPLES)
     wsSamples.Range("A4:H1000").ClearContents
     outRow = 4
 
@@ -105,8 +142,223 @@ Public Sub RebuildSamples()
             Next r
         End If
     Next ws
+End Sub
 
-    MsgBox "Samples rebuilt.", vbInformation
+Public Sub BuildCrossSectionData()
+    Dim wsOut As Worksheet
+    Dim ws As Worksheet
+    Dim r As Long, outRow As Long
+    Dim rl As Double, fromD As Double, toD As Double
+
+    Set wsOut = ThisWorkbook.Worksheets(SH_XS)
+    wsOut.Range("A4:J5000").ClearContents
+    outRow = 4
+
+    For Each ws In ThisWorkbook.Worksheets
+        If IsPointSheet(ws) Then
+            rl = SafeDbl(ws.Range("B14").Value)
+            For r = 5 To 19
+                If SafeDbl(ws.Cells(r, 5).Value) > 0 Or SafeDbl(ws.Cells(r, 6).Value) > 0 Then
+                    fromD = SafeDbl(ws.Cells(r, 5).Value)
+                    toD = SafeDbl(ws.Cells(r, 6).Value)
+                    wsOut.Cells(outRow, 1).Value = Nz(ws.Range("B5").Value)
+                    wsOut.Cells(outRow, 2).Value = ws.Name
+                    wsOut.Cells(outRow, 3).Value = ws.Range("B12").Value
+                    wsOut.Cells(outRow, 4).Value = ws.Range("B13").Value
+                    wsOut.Cells(outRow, 5).Value = rl
+                    wsOut.Cells(outRow, 6).Value = fromD
+                    wsOut.Cells(outRow, 7).Value = toD
+                    wsOut.Cells(outRow, 8).Value = rl - fromD
+                    wsOut.Cells(outRow, 9).Value = rl - toD
+                    wsOut.Cells(outRow, 10).Value = Nz(ws.Cells(r, 17).Value)
+                    outRow = outRow + 1
+                End If
+            Next r
+        End If
+    Next ws
+End Sub
+
+Public Sub BuildCombinedExportPreview()
+    Dim wsOut As Worksheet
+    Dim ws As Worksheet
+    Dim outRow As Long
+    Dim r As Long
+
+    Set wsOut = ThisWorkbook.Worksheets(SH_EXPORT)
+    wsOut.Range("A4:D5000").ClearContents
+    outRow = 4
+
+    For Each ws In ThisWorkbook.Worksheets
+        If IsPointSheet(ws) Then
+            wsOut.Cells(outRow, 1).Value = outRow - 3
+            wsOut.Cells(outRow, 2).Value = ws.Name
+            wsOut.Cells(outRow, 3).Value = Nz(ws.Range("B5").Value)
+            wsOut.Cells(outRow, 4).Value = "JOB NAME: " & Nz(ProjectValue(2))
+            outRow = outRow + 1
+            wsOut.Cells(outRow, 4).Value = "/"
+            outRow = outRow + 1
+            For r = 5 To 19
+                If Nz(ws.Cells(r, 17).Value) <> "" Then
+                    wsOut.Cells(outRow, 4).Value = Format$(SafeDbl(ws.Cells(r, 5).Value), "0.00") & vbTab & Nz(ws.Cells(r, 17).Value)
+                    outRow = outRow + 1
+                End If
+            Next r
+            wsOut.Cells(outRow, 4).Value = "/"
+            outRow = outRow + 1
+            wsOut.Cells(outRow, 4).Value = "NOTES:"
+            outRow = outRow + 1
+            For r = 25 To 34
+                If Nz(ws.Cells(r, 1).Value) <> "" And Nz(ws.Cells(r, 2).Value) <> "" Then
+                    wsOut.Cells(outRow, 4).Value = Nz(ws.Cells(r, 1).Value) & ": " & Nz(ws.Cells(r, 2).Value)
+                    outRow = outRow + 1
+                End If
+            Next r
+            wsOut.Cells(outRow, 4).Value = "//"
+            outRow = outRow + 2
+        End If
+    Next ws
+    wsOut.Cells(outRow, 4).Value = "///"
+End Sub
+
+Public Sub ApplyTemplateUsability(ByVal ws As Worksheet)
+    With ws
+        .Activate
+        ActiveWindow.DisplayGridlines = False
+        .Rows("1:40").RowHeight = 18
+        .Rows("5:19").RowHeight = 22
+        .Rows("25:34").RowHeight = 22
+        .Columns("A:B").ColumnWidth = 16
+        .Columns("D:Q").ColumnWidth = 16
+        .Columns("P:Q").ColumnWidth = 28
+        .Range("A1:Q40").WrapText = False
+        .Range("Q5:Q19").WrapText = True
+        .Range("B4:B17").Interior.Color = RGB(255, 242, 204)
+        .Range("D5:P19").Interior.Color = RGB(255, 242, 204)
+        .Range("A25:H34").Interior.Color = RGB(255, 242, 204)
+        .Range("Q5:Q19").Interior.Color = RGB(226, 239, 218)
+        .Range("N3:Q7").Interior.Color = RGB(217, 234, 247)
+        .Range("A1:Q1").Font.Bold = True
+        .Range("A3:Q3").Font.Bold = True
+        .Range("A24:H24").Font.Bold = True
+        .Range("A4").Select
+        ActiveWindow.FreezePanes = False
+        .Range("D5").Select
+        ActiveWindow.FreezePanes = True
+    End With
+End Sub
+
+Public Sub AutoCalculateLayerFields(ByVal ws As Worksheet)
+    Dim r As Long
+    Dim fromD As Double, toD As Double
+    Dim sampleFrom As Double, sampleTo As Double
+
+    For r = 5 To 19
+        fromD = SafeDbl(ws.Cells(r, 5).Value)
+        toD = SafeDbl(ws.Cells(r, 6).Value)
+        If toD > fromD Then
+            ws.Cells(r, 7).Value = Round(toD - fromD, 2)
+        Else
+            ws.Cells(r, 7).ClearContents
+        End If
+    Next r
+
+    For r = 25 To 34
+        sampleFrom = SafeDbl(ws.Cells(r, 5).Value)
+        sampleTo = SafeDbl(ws.Cells(r, 6).Value)
+        If sampleTo > sampleFrom Then
+            ws.Cells(r, 7).Value = Round((sampleFrom + sampleTo) / 2, 2)
+        ElseIf sampleFrom > 0 Then
+            ws.Cells(r, 7).Value = sampleFrom
+        End If
+    Next r
+End Sub
+
+Public Sub BuildLayerPreviews(ByVal ws As Worksheet)
+    Dim r As Long
+    For r = 5 To 19
+        ws.Cells(r, 17).Value = BuildLayerDescription(ws, r)
+    Next r
+End Sub
+
+Public Function BuildLayerDescription(ByVal ws As Worksheet, ByVal rowNum As Long) As String
+    Dim moisture As String, colour1 As String, colour2 As String
+    Dim consDen As String, structureDesc As String, soilType As String
+    Dim origin As String, materialType As String, layerNote As String
+    Dim desc As String, mainPart As String
+
+    moisture = Nz(ws.Cells(rowNum, 8).Value)
+    colour1 = Nz(ws.Cells(rowNum, 9).Value)
+    colour2 = Nz(ws.Cells(rowNum, 10).Value)
+    consDen = Nz(ws.Cells(rowNum, 11).Value)
+    structureDesc = Nz(ws.Cells(rowNum, 12).Value)
+    soilType = Nz(ws.Cells(rowNum, 13).Value)
+    origin = Nz(ws.Cells(rowNum, 14).Value)
+    materialType = Nz(ws.Cells(rowNum, 15).Value)
+    layerNote = Nz(ws.Cells(rowNum, 16).Value)
+
+    If Nz(ws.Cells(rowNum, 5).Value) = "" And Nz(ws.Cells(rowNum, 6).Value) = "" Then
+        BuildLayerDescription = ""
+        Exit Function
+    End If
+
+    mainPart = JoinComma(moisture, JoinColour(colour1, colour2), consDen, structureDesc, soilType)
+
+    If origin <> "" Then
+        If mainPart <> "" Then
+            desc = mainPart & "; " & origin
+        Else
+            desc = origin
+        End If
+    Else
+        desc = mainPart
+    End If
+
+    If materialType <> "" Then
+        If desc <> "" Then
+            desc = desc & ". " & materialType
+        Else
+            desc = materialType
+        End If
+    End If
+
+    If layerNote <> "" Then
+        If desc <> "" Then
+            desc = desc & ". " & layerNote
+        Else
+            desc = layerNote
+        End If
+    End If
+
+    If desc <> "" And Right$(desc, 1) <> "." Then desc = desc & "."
+    BuildLayerDescription = desc
+End Function
+
+Public Sub HighlightValidation(ByVal ws As Worksheet)
+    Dim r As Long
+    Dim soilType As String, consDen As String
+
+    ws.Range("K5:K19").Interior.Color = RGB(255, 242, 204)
+    ws.Range("E5:F19").Interior.Color = RGB(255, 242, 204)
+
+    For r = 5 To 19
+        soilType = LCase$(Nz(ws.Cells(r, 13).Value))
+        consDen = LCase$(Nz(ws.Cells(r, 11).Value))
+
+        If (SafeDbl(ws.Cells(r, 5).Value) > 0 Or SafeDbl(ws.Cells(r, 6).Value) > 0) Then
+            If SafeDbl(ws.Cells(r, 6).Value) <= SafeDbl(ws.Cells(r, 5).Value) Then
+                ws.Cells(r, 6).Interior.Color = RGB(255, 199, 206)
+            End If
+            If Nz(ws.Cells(r, 13).Value) = "" Then
+                ws.Cells(r, 13).Interior.Color = RGB(255, 199, 206)
+            End If
+        End If
+
+        If IsNonCohesiveSoil(soilType) And IsCohesiveDescriptor(consDen) Then
+            ws.Cells(r, 11).Interior.Color = RGB(255, 235, 156)
+        ElseIf IsCohesiveSoil(soilType) And IsNonCohesiveDescriptor(consDen) Then
+            ws.Cells(r, 11).Interior.Color = RGB(255, 235, 156)
+        End If
+    Next r
 End Sub
 
 Public Function BuildTerminationText(ByVal ws As Worksheet) As String
@@ -120,6 +372,70 @@ Public Function BuildTerminationText(ByVal ws As Worksheet) As String
     BuildTerminationText = ""
 End Function
 
+Public Function NextIndexRow(ByVal wsIndex As Worksheet) As Long
+    NextIndexRow = wsIndex.Cells(wsIndex.Rows.Count, 1).End(xlUp).Row + 1
+    If NextIndexRow < 4 Then NextIndexRow = 4
+End Function
+
+Public Sub PopulateProjectDefaults(ByVal ws As Worksheet, ByVal newName As String)
+    ws.Range("B4").Value = "TP"
+    ws.Range("B5").Value = newName
+    ws.Range("B6").Value = ProjectValue(1)
+    ws.Range("B9").Value = ProjectValue(9)
+    ws.Range("B10").Value = ProjectValue(10)
+    ws.Range("B16").Value = ProjectValue(8)
+End Sub
+
+Public Function ProjectValue(ByVal projectRow As Long) As Variant
+    ProjectValue = ThisWorkbook.Worksheets(SH_PROJECT).Cells(projectRow + 2, 2).Value
+End Function
+
+Public Function JoinComma(ParamArray parts() As Variant) As String
+    Dim i As Long, partText As String, outText As String
+    For i = LBound(parts) To UBound(parts)
+        partText = Nz(parts(i))
+        If partText <> "" Then
+            If outText <> "" Then outText = outText & ", "
+            outText = outText & partText
+        End If
+    Next i
+    JoinComma = outText
+End Function
+
+Public Function JoinColour(ByVal colour1 As String, ByVal colour2 As String) As String
+    If colour1 <> "" And colour2 <> "" Then
+        JoinColour = colour1 & ", " & colour2
+    Else
+        JoinColour = JoinComma(colour1, colour2)
+    End If
+End Function
+
+Public Function IsCohesiveDescriptor(ByVal s As String) As Boolean
+    Select Case LCase$(Trim$(s))
+        Case "very soft", "soft", "firm", "stiff", "very stiff"
+            IsCohesiveDescriptor = True
+    End Select
+End Function
+
+Public Function IsNonCohesiveDescriptor(ByVal s As String) As Boolean
+    Select Case LCase$(Trim$(s))
+        Case "very loose", "loose", "medium dense", "dense", "very dense"
+            IsNonCohesiveDescriptor = True
+    End Select
+End Function
+
+Public Function IsNonCohesiveSoil(ByVal s As String) As Boolean
+    s = LCase$(Trim$(s))
+    IsNonCohesiveSoil = (InStr(s, "sand") > 0 Or InStr(s, "gravel") > 0 Or InStr(s, "cobble") > 0 Or InStr(s, "boulder") > 0) _
+        And InStr(s, "clay") = 0 And InStr(s, "silt") = 0
+    If s = "silty sand" Or s = "clayey sand" Then IsNonCohesiveSoil = True
+End Function
+
+Public Function IsCohesiveSoil(ByVal s As String) As Boolean
+    s = LCase$(Trim$(s))
+    IsCohesiveSoil = (InStr(s, "clay") > 0 Or InStr(s, "silt") > 0)
+End Function
+
 Public Function Nz(ByVal v As Variant) As String
     If IsError(v) Then
         Nz = ""
@@ -129,6 +445,14 @@ Public Function Nz(ByVal v As Variant) As String
         Nz = ""
     Else
         Nz = Trim$(CStr(v))
+    End If
+End Function
+
+Public Function SafeDbl(ByVal v As Variant) As Double
+    If IsNumeric(v) Then
+        SafeDbl = CDbl(v)
+    Else
+        SafeDbl = 0#
     End If
 End Function
 
@@ -144,7 +468,17 @@ Public Function WorksheetExists(ByVal sheetName As String) As Boolean
 End Function
 
 Public Function IsPointSheet(ByVal ws As Worksheet) As Boolean
-    IsPointSheet = Not (ws.Name = "ProjectInfo" Or ws.Name = "Index" Or ws.Name = "TP_Template" _
-        Or ws.Name = "LookupTables" Or ws.Name = "Samples" Or ws.Name = "Summary" _
-        Or ws.Name = "CrossSectionData" Or ws.Name = "Export_All")
+    IsPointSheet = Not (ws.Name = SH_PROJECT Or ws.Name = SH_INDEX Or ws.Name = SH_TEMPLATE _
+        Or ws.Name = SH_LOOKUPS Or ws.Name = SH_SAMPLES Or ws.Name = SH_SUMMARY _
+        Or ws.Name = SH_XS Or ws.Name = SH_EXPORT)
 End Function
+
+Public Sub RunSmokeTest()
+    On Error GoTo FailHandler
+    CreateNewTestPitSheet
+    RefreshAll
+    MsgBox "Smoke test completed.", vbInformation
+    Exit Sub
+FailHandler:
+    MsgBox "Smoke test failed: " & Err.Description, vbCritical
+End Sub
