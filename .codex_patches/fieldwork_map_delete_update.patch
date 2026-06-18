@@ -1,0 +1,93 @@
+--- a/fieldwork_app_review_copy/app.py
++++ b/fieldwork_app_review_copy/app.py
+@@ -1596,6 +1596,40 @@
+     return redirect(url_for("project", pid=pid, tab="map"))
+ 
+ 
++@app.route("/project/<int:pid>/delete_map_items", methods=["POST"])
++def delete_map_items(pid):
++    ids = request.form.get("selected_ids_json", "[]")
++    try:
++        selected = [int(x) for x in json.loads(ids)]
++    except Exception:
++        selected = []
++    selected = [x for x in selected if x > 0]
++    if not selected:
++        return redirect(url_for("project", pid=pid, tab="map", error="Select at least one map feature to delete."))
++
++    conn = get_db()
++    existing = [dict(r) for r in conn.execute("SELECT * FROM map_items WHERE project_id=?", (pid,)).fetchall()]
++    placeholders = ",".join("?" for _ in selected)
++    matching = conn.execute(
++        f"SELECT id FROM map_items WHERE project_id=? AND id IN ({placeholders})",
++        [pid] + selected,
++    ).fetchall()
++    if not matching:
++        conn.close()
++        return redirect(url_for("project", pid=pid, tab="map", error="Selected map features were not found."))
++
++    conn.execute(
++        "INSERT INTO import_backups (project_id, created_at, item_count, backup_json) VALUES (?, ?, ?, ?)",
++        (pid, datetime.now().isoformat(timespec="seconds"), len(existing), json.dumps(existing)),
++    )
++    conn.execute(f"DELETE FROM map_items WHERE project_id=? AND id IN ({placeholders})", [pid] + selected)
++    deleted_count = len(matching)
++    conn.commit()
++    sync_historical_rates(conn)
++    conn.close()
++    return redirect(url_for("project", pid=pid, tab="map", notice=f"Deleted {deleted_count} map feature(s). A restore backup was saved."))
++
++
+ 
+ @app.route("/edit_project/<int:pid>", methods=["GET","POST"])
+ def edit_project(pid):
+--- a/fieldwork_app_review_copy/templates/project.html
++++ b/fieldwork_app_review_copy/templates/project.html
+@@ -390,6 +390,10 @@
+ <div class="sidebar-section">
+ <h3>Map selection</h3>
+ <div id="selectionSummary" class="selection-summary">No items selected.</div>
++<form method="post" action="{{ url_for('delete_map_items', pid=project['id']) }}" id="deleteMapItemsForm" onsubmit="return confirmDeleteSelectedMapItems();">
++<input type="hidden" name="selected_ids_json" id="deleteSelectedIdsInput">
++<button type="submit" class="danger">Delete selected feature(s)</button>
++</form>
+ </div>
+ <div class="sidebar-section">
+ <h4>Bulk change selected</h4>
+@@ -426,7 +430,7 @@
+ <label><span>Work start</span><input id="work_start_date" name="work_start_date" type="date"></label>
+ <label><span>Work end</span><input id="work_end_date" name="work_end_date" type="date"></label>
+ <label><span>Notes</span><textarea id="notes" name="notes" rows="4"></textarea></label>
+-<div class="inline-actions"><button type="button" id="saveSingleBtn">Save item</button><button type="button" class="button secondary" id="movePointBtn">Move location</button></div>
++<div class="inline-actions"><button type="button" id="saveSingleBtn">Save item</button><button type="button" class="button secondary" id="movePointBtn">Move location</button><button type="button" class="danger" id="deleteSingleMapBtn">Delete</button></div>
+ </form>
+ </div>
+ </aside>
+@@ -778,6 +782,7 @@
+ }
+ function refreshSelectionView(){
+   document.getElementById("selectedIdsInput").value = JSON.stringify(selectedIds);
++  document.getElementById("deleteSelectedIdsInput").value = JSON.stringify(selectedIds);
+   if (selectedIds.length === 0){
+     document.getElementById("selectionSummary").innerHTML = "No items selected.";
+     document.getElementById("singleEditorEmpty").classList.remove("hidden");
+@@ -807,6 +812,19 @@
+     document.getElementById("singleEditorEmpty").innerText = "Multiple items selected. Use bulk change above.";
+   }
+ }
++function confirmDeleteSelectedMapItems(){
++  if (!selectedIds.length) {
++    setMapStatus('Select one or more features before deleting.');
++    return false;
++  }
++  const names = selectedIds.map(id => itemsById[id]?.item_id || id).join(', ');
++  return confirm(`Delete ${selectedIds.length} selected feature(s)?\n\n${names}\n\nA restore backup will be saved.`);
++}
++document.getElementById("deleteSingleMapBtn").addEventListener("click", () => {
++  if (selectedIds.length !== 1) { setMapStatus('Select one feature to delete.'); return; }
++  document.getElementById("deleteSelectedIdsInput").value = JSON.stringify(selectedIds);
++  if (confirmDeleteSelectedMapItems()) document.getElementById("deleteMapItemsForm").submit();
++});
+ function redrawStyles(){
+   Object.keys(itemsById).forEach(id => {
+     const item = itemsById[id];
