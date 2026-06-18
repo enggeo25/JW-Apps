@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - ".codex_upload/fieldwork_app_review_copy_upload.zip.b64"
+      - ".codex_upload/parts/**"
       - ".github/workflows/unpack-fieldwork-app.yml"
 
 permissions:
@@ -22,7 +22,8 @@ jobs:
           set -euo pipefail
           rm -rf fieldwork_app_review_copy
           mkdir -p /tmp/fieldwork-upload
-          base64 -d .codex_upload/fieldwork_app_review_copy_upload.zip.b64 > /tmp/fieldwork_app_review_copy_upload.zip
+          cat .codex_upload/parts/*.b64 > /tmp/fieldwork_app_review_copy_upload.b64
+          base64 -d /tmp/fieldwork_app_review_copy_upload.b64 > /tmp/fieldwork_app_review_copy_upload.zip
           unzip -q /tmp/fieldwork_app_review_copy_upload.zip -d /tmp/fieldwork-upload
           cp -R /tmp/fieldwork-upload/fieldwork_app_review_copy ./fieldwork_app_review_copy
           rm -rf .codex_upload
