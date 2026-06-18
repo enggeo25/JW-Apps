@@ -1,0 +1,106 @@
+{% extends "layout.html" %}
+{% block content %}
+<section class="card">
+<div class="section-head"><h2>Edit Project</h2><a class="button secondary" href="{{ url_for('project', pid=project['id'], tab='overview') }}">Back</a></div>
+<form method="post" class="form-grid">
+<label><span>Project name</span><input name="name" value="{{ project['name'] }}"></label>
+<label><span>Project number</span><input name="project_number" value="{{ project['project_number'] }}"></label>
+<label><span>Task code</span><input name="task_code" value="{{ project['task_code'] }}"></label>
+<label><span>Client</span><input name="client" value="{{ project['client'] }}"></label>
+<label class="full"><span>Site location</span><input name="site_location" value="{{ project['site_location'] }}"></label>
+
+<section class="full method-selector-card">
+  <h3>Applicable testing methods</h3>
+  <div class="method-toggles">
+    <label class="method-toggle"><input type="checkbox" name="use_borehole" {% if project['use_borehole'] %}checked{% endif %}><span>Borehole</span></label>
+    <label class="method-toggle"><input type="checkbox" name="use_cptu" {% if project['use_cptu'] %}checked{% endif %}><span>CPTU</span></label>
+    <label class="method-toggle"><input type="checkbox" name="use_test_pit" {% if project['use_test_pit'] %}checked{% endif %}><span>Test Pit</span></label>
+    <label class="method-toggle"><input type="checkbox" name="use_geophysics" {% if project['use_geophysics'] %}checked{% endif %}><span>Geophysics</span></label>
+  </div>
+</section>
+
+<div class="method-box method-box-borehole">
+  <div class="method-title">Borehole Planning</div>
+  <label><span>Borehole start</span><input name="borehole_start_date" type="date" value="{{ project['borehole_start_date'] }}"></label>
+  <label><span>Borehole end</span><input name="borehole_end_date" type="date" value="{{ project['borehole_end_date'] }}"></label>
+  <label><span>Budget metres</span><input name="borehole_budget_meters" type="number" step="0.01" value="{{ project['borehole_budget_meters'] }}"></label>
+  <label class="checkbox-inline"><input type="checkbox" name="borehole_include_saturday" {% if project['borehole_include_saturday'] %}checked{% endif %}><span>Include Saturday</span></label>
+</div>
+
+<div class="method-box method-box-cptu">
+  <div class="method-title">CPTU Planning</div>
+  <label><span>CPTU start</span><input name="cptu_start_date" type="date" value="{{ project['cptu_start_date'] }}"></label>
+  <label><span>CPTU end</span><input name="cptu_end_date" type="date" value="{{ project['cptu_end_date'] }}"></label>
+  <label><span>Budget metres</span><input name="cptu_budget_meters" type="number" step="0.01" value="{{ project['cptu_budget_meters'] }}"></label>
+  <label class="checkbox-inline"><input type="checkbox" name="cptu_include_saturday" {% if project['cptu_include_saturday'] %}checked{% endif %}><span>Include Saturday</span></label>
+</div>
+
+<div class="method-box method-box-testpit">
+  <div class="method-title">Test Pit Planning</div>
+  <label><span>Test Pit start</span><input name="test_pit_start_date" type="date" value="{{ project['test_pit_start_date'] }}"></label>
+  <label><span>Test Pit end</span><input name="test_pit_end_date" type="date" value="{{ project['test_pit_end_date'] }}"></label>
+  <label class="checkbox-inline"><input type="checkbox" name="test_pit_include_saturday" {% if project['test_pit_include_saturday'] %}checked{% endif %}><span>Include Saturday</span></label>
+</div>
+
+<div class="method-box method-box-geophysics">
+  <div class="method-title">Geophysics Planning</div>
+  <label><span>Geophysics start</span><input name="geophysics_start_date" type="date" value="{{ project['geophysics_start_date'] }}"></label>
+  <label><span>Geophysics end</span><input name="geophysics_end_date" type="date" value="{{ project['geophysics_end_date'] }}"></label>
+  <label><span>Budget metres</span><input name="geophysics_budget_meters" type="number" step="0.01" value="{{ project['geophysics_budget_meters'] }}"></label>
+  <label class="checkbox-inline"><input type="checkbox" name="geophysics_include_saturday" {% if project['geophysics_include_saturday'] %}checked{% endif %}><span>Include Saturday</span></label>
+</div>
+
+<section class="full method-selector-card">
+  <h3>Custom test methods</h3>
+  <div id="customMethods">
+    {% for cm in project['custom_methods'] %}
+    <div class="custom-method-row">
+      <input name="custom_method_name" value="{{ cm['name'] }}" placeholder="Method name">
+      <select name="custom_method_symbol">
+        <option value="circle" {% if cm['symbol']=='circle' %}selected{% endif %}>Circle</option>
+        <option value="triangle" {% if cm['symbol']=='triangle' %}selected{% endif %}>Triangle</option>
+        <option value="square" {% if cm['symbol']=='square' %}selected{% endif %}>Square</option>
+        <option value="line" {% if cm['symbol']=='line' %}selected{% endif %}>Line</option>
+      </select>
+      <input name="custom_method_color" type="color" value="{{ cm['color'] }}">
+    </div>
+    {% endfor %}
+    {% if not project['custom_methods'] %}
+    <div class="custom-method-row">
+      <input name="custom_method_name" placeholder="Method name">
+      <select name="custom_method_symbol">
+        <option value="circle">Circle</option>
+        <option value="triangle">Triangle</option>
+        <option value="square">Square</option>
+        <option value="line">Line</option>
+      </select>
+      <input name="custom_method_color" type="color" value="#0f766e">
+    </div>
+    {% endif %}
+  </div>
+  <button type="button" class="button secondary" onclick="addCustomMethodRow()">Add custom method</button>
+</section>
+
+<div class="full"><button type="submit">Save Project Changes</button></div>
+</form>
+<script>
+function addCustomMethodRow(){
+  const wrap = document.getElementById('customMethods');
+  const row = document.createElement('div');
+  row.className = 'custom-method-row';
+  row.innerHTML = '<input name="custom_method_name" placeholder="Method name"><select name="custom_method_symbol"><option value="circle">Circle</option><option value="triangle">Triangle</option><option value="square">Square</option><option value="line">Line</option></select><input name="custom_method_color" type="color" value="#0f766e">';
+  wrap.appendChild(row);
+}
+function bindMethodToggle(checkboxName, selector){
+  const cb = document.querySelector(`input[name="${checkboxName}"]`);
+  const box = document.querySelector(selector);
+  const sync = () => { if (box) box.classList.toggle('hidden-method', !cb?.checked); };
+  if (cb){ cb.addEventListener('change', sync); sync(); }
+}
+bindMethodToggle('use_borehole', '.method-box-borehole');
+bindMethodToggle('use_cptu', '.method-box-cptu');
+bindMethodToggle('use_test_pit', '.method-box-testpit');
+bindMethodToggle('use_geophysics', '.method-box-geophysics');
+</script>
+</section>
+{% endblock %}

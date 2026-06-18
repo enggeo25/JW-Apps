@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 72" role="img" aria-label="Jones and Wagener">
+  <rect width="280" height="72" rx="10" fill="#ffffff"/>
+  <rect x="8" y="8" width="56" height="56" rx="8" fill="#111827"/>
+  <path d="M23 47c9 0 13-4 13-13V21h10v14c0 15-8 23-23 23v-11z" fill="#ffffff"/>
+  <path d="M48 48h7l8-27h-7l-4 16-5-16h-6l-5 16-4-16h-7l8 27h7l4-15 4 15z" fill="#ffffff" opacity=".9"/>
+  <text x="78" y="31" font-family="Arial, Helvetica, sans-serif" font-size="20" font-weight="700" fill="#111827">Jones &amp; Wagener</text>
+  <text x="78" y="53" font-family="Arial, Helvetica, sans-serif" font-size="14" fill="#475569">Fieldwork Project Manager</text>
+</svg>

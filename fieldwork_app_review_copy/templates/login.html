@@ -1,0 +1,16 @@
+{% extends "layout.html" %}
+{% block title %}Login - Fieldwork Project Manager{% endblock %}
+{% block content %}
+<section class="login-shell">
+  <div class="card login-card">
+    <h2>Sign in</h2>
+    <p class="muted">Use the email and password added in Supabase Auth.</p>
+    {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
+    <form method="post" class="form-grid one">
+      <label><span>Email</span><input name="email" type="email" autocomplete="email" required></label>
+      <label><span>Password</span><input name="password" type="password" autocomplete="current-password" required></label>
+      <div><button type="submit">Log in</button></div>
+    </form>
+  </div>
+</section>
+{% endblock %}

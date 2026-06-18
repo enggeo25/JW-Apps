@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: fieldwork-progress-app
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    healthCheckPath: /healthz
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: FLASK_SECRET_KEY
+        sync: false
+      - key: LOCAL_AUTH_BYPASS
+        value: false

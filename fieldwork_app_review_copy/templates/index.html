@@ -1,0 +1,135 @@
+{% extends "layout.html" %}
+{% block content %}
+{% if notice %}<div class="notice success">{{ notice }}</div>{% endif %}
+{% if error %}<div class="notice error">{{ error }}</div>{% endif %}
+<div class="grid one">
+<section class="card accent-blue">
+<h2>Create Project</h2>
+<form method="post" action="{{ url_for('add_project') }}" class="form-grid">
+<label><span>Project name</span><input name="name" required></label>
+<label><span>Project number</span><input name="project_number"></label>
+<label><span>Task code</span><input name="task_code"></label>
+<label><span>Client</span><input name="client"></label>
+<label class="full"><span>Site location</span><input name="site_location"></label>
+
+<section class="full method-selector-card">
+  <h3>Applicable testing methods</h3>
+  <div class="method-toggles">
+    <label class="method-toggle"><input type="checkbox" name="use_borehole" checked><span>Borehole</span></label>
+    <label class="method-toggle"><input type="checkbox" name="use_cptu" checked><span>CPTU</span></label>
+    <label class="method-toggle"><input type="checkbox" name="use_test_pit" checked><span>Test Pit</span></label>
+    <label class="method-toggle"><input type="checkbox" name="use_geophysics" checked><span>Geophysics</span></label>
+  </div>
+</section>
+
+
+<div class="method-box method-box-borehole">
+  <div class="method-title">Borehole Planning</div>
+  <label><span>Borehole start</span><input name="borehole_start_date" type="date"></label>
+  <label><span>Borehole end</span><input name="borehole_end_date" type="date"></label>
+  <label><span>Budget metres</span><input name="borehole_budget_meters" type="number" step="0.01"></label>
+  <label class="checkbox-inline"><input type="checkbox" name="borehole_include_saturday"><span>Include Saturday</span></label>
+</div>
+
+<div class="method-box method-box-cptu">
+  <div class="method-title">CPTU Planning</div>
+  <label><span>CPTU start</span><input name="cptu_start_date" type="date"></label>
+  <label><span>CPTU end</span><input name="cptu_end_date" type="date"></label>
+  <label><span>Budget metres</span><input name="cptu_budget_meters" type="number" step="0.01"></label>
+  <label class="checkbox-inline"><input type="checkbox" name="cptu_include_saturday"><span>Include Saturday</span></label>
+</div>
+
+<div class="method-box method-box-testpit">
+  <div class="method-title">Test Pit Planning</div>
+  <label><span>Test Pit start</span><input name="test_pit_start_date" type="date"></label>
+  <label><span>Test Pit end</span><input name="test_pit_end_date" type="date"></label>
+  <label class="checkbox-inline"><input type="checkbox" name="test_pit_include_saturday"><span>Include Saturday</span></label>
+</div>
+
+<div class="method-box method-box-geophysics">
+  <div class="method-title">Geophysics Planning</div>
+  <label><span>Geophysics start</span><input name="geophysics_start_date" type="date"></label>
+  <label><span>Geophysics end</span><input name="geophysics_end_date" type="date"></label>
+  <label><span>Budget metres</span><input name="geophysics_budget_meters" type="number" step="0.01"></label>
+  <label class="checkbox-inline"><input type="checkbox" name="geophysics_include_saturday"><span>Include Saturday</span></label>
+</div>
+
+<section class="full method-selector-card">
+  <h3>Custom test methods</h3>
+  <div id="customMethods">
+    <div class="custom-method-row">
+      <input name="custom_method_name" placeholder="Method name">
+      <select name="custom_method_symbol">
+        <option value="circle">Circle</option>
+        <option value="triangle">Triangle</option>
+        <option value="square">Square</option>
+        <option value="line">Line</option>
+      </select>
+      <input name="custom_method_color" type="color" value="#0f766e">
+    </div>
+  </div>
+  <button type="button" class="button secondary" onclick="addCustomMethodRow()">Add custom method</button>
+</section>
+
+<div class="full"><button type="submit">Create Project</button></div>
+</form>
+<script>
+function addCustomMethodRow(){
+  const wrap = document.getElementById('customMethods');
+  const row = document.createElement('div');
+  row.className = 'custom-method-row';
+  row.innerHTML = '<input name="custom_method_name" placeholder="Method name"><select name="custom_method_symbol"><option value="circle">Circle</option><option value="triangle">Triangle</option><option value="square">Square</option><option value="line">Line</option></select><input name="custom_method_color" type="color" value="#0f766e">';
+  wrap.appendChild(row);
+}
+function bindMethodToggle(checkboxName, selector){
+  const cb = document.querySelector(`input[name="${checkboxName}"]`);
+  const box = document.querySelector(selector);
+  const sync = () => { if (box) box.classList.toggle('hidden-method', !cb?.checked); };
+  if (cb){ cb.addEventListener('change', sync); sync(); }
+}
+bindMethodToggle('use_borehole', '.method-box-borehole');
+bindMethodToggle('use_cptu', '.method-box-cptu');
+bindMethodToggle('use_test_pit', '.method-box-testpit');
+bindMethodToggle('use_geophysics', '.method-box-geophysics');
+</script>
+</section>
+
+</div>
+<section class="card accent-green">
+<div class="section-head">
+  <h2>Move a Project to Hosted Storage</h2>
+  <span class="pill green">JSON import</span>
+</div>
+<p class="muted">Export a project from another copy of the app, then import it here after the hosted database is connected.</p>
+<form method="post" action="{{ url_for('import_project_json') }}" enctype="multipart/form-data" class="map-import-form">
+  <input type="file" name="project_json" accept="application/json,.json" required>
+  <button type="submit">Import project JSON</button>
+</form>
+</section>
+
+<section class="card">
+<div class="section-head"><h2>Projects</h2><span class="muted">{{ projects|length }} total</span></div>
+{% if projects %}
+<div class="project-list">
+{% for p in projects %}
+<a class="project-card" href="{{ url_for('project', pid=p['id']) }}">
+<div class="project-card-top"><h3>{{ p['name'] }}</h3><span class="pill blue">Open</span></div>
+<p class="meta"><strong>Project No:</strong> {{ p['project_number'] or '-' }} | <strong>Task Code:</strong> {{ p['task_code'] or '-' }}</p>
+<p class="meta"><strong>Client:</strong> {{ p['client'] or '-' }} | <strong>Site:</strong> {{ p['site_location'] or '-' }}</p>
+</a>
+{% endfor %}
+</div>
+{% else %}<p class="empty">No projects yet.</p>{% endif %}
+</section>
+
+<section class="card compact-whats-new">
+  <h2>Current Version</h2>
+  <ul class="help-list">
+    <li>Interactive calendar with editing</li>
+    <li>Map + calendar + data synced</li>
+    <li>Meter tracking and planning</li>
+    <li>Cloud-ready database, login, and migration support</li>
+  </ul>
+</section>
+
+{% endblock %}

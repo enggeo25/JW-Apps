@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>{% block title %}Geotech Tracker GIS{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='leaflet_fallback.css') }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+</head>
+<body>
+<div class="container">
+<header class="topbar">
+<div class="brand-wrap">
+<img src="{{ url_for('static', filename='jw_logo.svg') }}" alt="Jones & Wagener logo" class="brand-logo">
+<div class="app-title"><h1>Fieldwork Project Manager</h1></div>
+</div>
+{% if auth_enabled %}
+<div class="auth-bar">
+  {% if current_user_email %}
+    <span>{{ current_user_email }}</span>
+    <a class="button secondary" href="{{ url_for('logout') }}">Log out</a>
+  {% endif %}
+</div>
+{% endif %}
+</header>
+{% block content %}{% endblock %}
+</div>
+<footer class="app-footer">
+  Created by James le Roux &middot; Property of Jones & Wagener Pty Ltd
+</footer>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="{{ url_for('static', filename='leaflet_fallback.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>
