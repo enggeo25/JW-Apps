@@ -390,6 +390,10 @@
 <div class="sidebar-section">
 <h3>Map selection</h3>
 <div id="selectionSummary" class="selection-summary">No items selected.</div>
+<form method="post" action="{{ url_for('delete_map_items', pid=project['id']) }}" id="deleteMapItemsForm" onsubmit="return confirmDeleteSelectedMapItems();">
+<input type="hidden" name="selected_ids_json" id="deleteSelectedIdsInput">
+<button type="submit" class="danger">Delete selected feature(s)</button>
+</form>
 </div>
 <div class="sidebar-section">
 <h4>Bulk change selected</h4>
@@ -426,7 +430,7 @@
 <label><span>Work start</span><input id="work_start_date" name="work_start_date" type="date"></label>
 <label><span>Work end</span><input id="work_end_date" name="work_end_date" type="date"></label>
 <label><span>Notes</span><textarea id="notes" name="notes" rows="4"></textarea></label>
-<div class="inline-actions"><button type="button" id="saveSingleBtn">Save item</button><button type="button" class="button secondary" id="movePointBtn">Move location</button></div>
+<div class="inline-actions"><button type="button" id="saveSingleBtn">Save item</button><button type="button" class="button secondary" id="movePointBtn">Move location</button><button type="button" class="danger" id="deleteSingleMapBtn">Delete</button></div>
 </form>
 </div>
 </aside>
@@ -778,6 +782,7 @@ function toggleSelect(id){
 }
 function refreshSelectionView(){
   document.getElementById("selectedIdsInput").value = JSON.stringify(selectedIds);
+  document.getElementById("deleteSelectedIdsInput").value = JSON.stringify(selectedIds);
   if (selectedIds.length === 0){
     document.getElementById("selectionSummary").innerHTML = "No items selected.";
     document.getElementById("singleEditorEmpty").classList.remove("hidden");
@@ -807,6 +812,19 @@ function refreshSelectionView(){
     document.getElementById("singleEditorEmpty").innerText = "Multiple items selected. Use bulk change above.";
   }
 }
+function confirmDeleteSelectedMapItems(){
+  if (!selectedIds.length) {
+    setMapStatus('Select one or more features before deleting.');
+    return false;
+  }
+  const names = selectedIds.map(id => itemsById[id]?.item_id || id).join(', ');
+  return confirm(`Delete ${selectedIds.length} selected feature(s)?\n\n${names}\n\nA restore backup will be saved.`);
+}
+document.getElementById("deleteSingleMapBtn").addEventListener("click", () => {
+  if (selectedIds.length !== 1) { setMapStatus('Select one feature to delete.'); return; }
+  document.getElementById("deleteSelectedIdsInput").value = JSON.stringify(selectedIds);
+  if (confirmDeleteSelectedMapItems()) document.getElementById("deleteMapItemsForm").submit();
+});
 function redrawStyles(){
   Object.keys(itemsById).forEach(id => {
     const item = itemsById[id];

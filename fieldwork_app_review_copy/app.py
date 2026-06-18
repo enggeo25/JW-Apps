@@ -1596,6 +1596,40 @@ def bulk_map_status(pid):
     return redirect(url_for("project", pid=pid, tab="map"))
 
 
+@app.route("/project/<int:pid>/delete_map_items", methods=["POST"])
+def delete_map_items(pid):
+    ids = request.form.get("selected_ids_json", "[]")
+    try:
+        selected = [int(x) for x in json.loads(ids)]
+    except Exception:
+        selected = []
+    selected = [x for x in selected if x > 0]
+    if not selected:
+        return redirect(url_for("project", pid=pid, tab="map", error="Select at least one map feature to delete."))
+
+    conn = get_db()
+    existing = [dict(r) for r in conn.execute("SELECT * FROM map_items WHERE project_id=?", (pid,)).fetchall()]
+    placeholders = ",".join("?" for _ in selected)
+    matching = conn.execute(
+        f"SELECT id FROM map_items WHERE project_id=? AND id IN ({placeholders})",
+        [pid] + selected,
+    ).fetchall()
+    if not matching:
+        conn.close()
+        return redirect(url_for("project", pid=pid, tab="map", error="Selected map features were not found."))
+
+    conn.execute(
+        "INSERT INTO import_backups (project_id, created_at, item_count, backup_json) VALUES (?, ?, ?, ?)",
+        (pid, datetime.now().isoformat(timespec="seconds"), len(existing), json.dumps(existing)),
+    )
+    conn.execute(f"DELETE FROM map_items WHERE project_id=? AND id IN ({placeholders})", [pid] + selected)
+    deleted_count = len(matching)
+    conn.commit()
+    sync_historical_rates(conn)
+    conn.close()
+    return redirect(url_for("project", pid=pid, tab="map", notice=f"Deleted {deleted_count} map feature(s). A restore backup was saved."))
+
+
 
 @app.route("/edit_project/<int:pid>", methods=["GET","POST"])
 def edit_project(pid):
