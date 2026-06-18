@@ -1,0 +1,40 @@
+name: Apply Codex Patch
+
+on:
+  push:
+    paths:
+      - ".codex_patches/*.patch"
+      - ".github/workflows/apply-codex-patch.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply latest Codex patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch_file="$(ls -t .codex_patches/*.patch 2>/dev/null | head -n 1 || true)"
+          if [ -z "$patch_file" ]; then
+            echo "No Codex patch file found. Nothing to apply."
+            exit 0
+          fi
+          git apply --whitespace=fix "$patch_file"
+          rm "$patch_file"
+          rmdir .codex_patches 2>/dev/null || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add fieldwork_app_review_copy .codex_patches || true
+          if git diff --cached --quiet; then
+            echo "Patch made no changes."
+            exit 0
+          fi
+          git commit -m "Apply fieldwork depth and map update"
+          git push
