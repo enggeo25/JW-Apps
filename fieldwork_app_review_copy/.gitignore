@@ -1,0 +1,19 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+env/
+.test_deps/
+
+# Local private data. Move data to hosted Supabase with JSON export/import.
+data.db
+*.sqlite
+*.sqlite3
+
+# Local exports and logs
+*_fieldwork_export.json
+*.log

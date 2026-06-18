@@ -434,6 +434,40 @@ def parse_coord_text(text):
             coords.append([lat, lon])
     return coords
 
+def normalize_planned_amount(value, fallback=0.0):
+    amount = safe_float(value)
+    if amount > 0:
+        return amount
+    return safe_float(fallback)
+
+def depth_actual(item):
+    return max(safe_float(item.get("depth_m")), 0.0)
+
+def depth_planned(item):
+    return max(safe_float(item.get("planned_amount")), 0.0)
+
+def item_meter_budget(rows):
+    planned_total = round(sum(depth_planned(x) for x in rows), 2)
+    actual_total = round(sum(depth_actual(x) for x in rows if depth_actual(x) > 0), 2)
+    completed_actual = round(sum(depth_actual(x) for x in rows if x.get("status") == "Completed" and depth_actual(x) > 0), 2)
+    remaining_to_plan = round(sum(max(depth_planned(x) - depth_actual(x), 0.0) for x in rows), 2)
+    over_drilled = round(sum(max(depth_actual(x) - depth_planned(x), 0.0) for x in rows if depth_planned(x) > 0), 2)
+    no_plan_actual = round(sum(depth_actual(x) for x in rows if depth_actual(x) > 0 and depth_planned(x) <= 0), 2)
+    net_bank = round(planned_total - actual_total, 2)
+    planned_count = sum(1 for x in rows if depth_planned(x) > 0)
+    drilled_count = sum(1 for x in rows if depth_actual(x) > 0)
+    return {
+        "planned_item_meters": planned_total,
+        "actual_drilled_meters": actual_total,
+        "completed_meters": completed_actual,
+        "remaining_to_planned_depth": remaining_to_plan,
+        "over_drilled_meters": over_drilled,
+        "unplanned_actual_meters": no_plan_actual,
+        "net_meter_bank": net_bank,
+        "planned_depth_count": planned_count,
+        "drilled_depth_count": drilled_count,
+    }
+
 def parse_kml_bytes(file_bytes):
     root = ET.fromstring(file_bytes)
     items = []
@@ -447,11 +481,11 @@ def parse_kml_bytes(file_bytes):
         if point_el is not None and point_el.text:
             coords = parse_coord_text(point_el.text)
             if coords:
-                items.append({"item_type": detect_type(name), "item_id": name, "geometry_type": "Point", "coords_json": json.dumps(coords[0]), "location_plan": "", "planned_amount": 1.0, "status": "Planned", "work_start_date": "", "work_end_date": "", "notes": desc})
+                items.append({"item_type": detect_type(name), "item_id": name, "geometry_type": "Point", "coords_json": json.dumps(coords[0]), "location_plan": "", "planned_amount": 0.0, "status": "Planned", "work_start_date": "", "work_end_date": "", "notes": desc})
         elif line_el is not None and line_el.text:
             coords = parse_coord_text(line_el.text)
             if coords:
-                items.append({"item_type": detect_type(name), "item_id": name, "geometry_type": "LineString", "coords_json": json.dumps(coords), "location_plan": "", "planned_amount": 1.0, "status": "Planned", "work_start_date": "", "work_end_date": "", "notes": desc})
+                items.append({"item_type": detect_type(name), "item_id": name, "geometry_type": "LineString", "coords_json": json.dumps(coords), "location_plan": "", "planned_amount": 0.0, "status": "Planned", "work_start_date": "", "work_end_date": "", "notes": desc})
     return items
 
 def extract_kml_bytes(upload_file):
@@ -590,8 +624,7 @@ def project_summary(items, project):
         pct_done = round((completed / total_items) * 100, 1) if total_items > 0 else 0.0
 
         budget_meters = safe_float(project.get(meter_f)) if meter_f else 0.0
-        logged_meters = round(sum(safe_float(x.get("depth_m")) for x in rows), 2)
-        completed_meters = round(sum(safe_float(x.get("depth_m")) for x in completed_rows), 2)
+        meter_budget = item_meter_budget(rows)
 
         summary["detail"][typ] = {
             "budget_days": budget_days, "total_items": total_items, "completed": completed,
@@ -602,8 +635,9 @@ def project_summary(items, project):
         }
         summary["meters"][typ] = {
             "budget_meters": budget_meters,
-            "logged_meters": logged_meters,
-            "completed_meters": completed_meters,
+            **meter_budget,
+            "budget_remaining_meters": round(budget_meters - meter_budget["actual_drilled_meters"], 2) if budget_meters else None,
+            "planned_vs_budget_meters": round(budget_meters - meter_budget["planned_item_meters"], 2) if budget_meters else None,
         }
         scores.append(pct_done)
 
@@ -651,7 +685,7 @@ def build_historical_rate_rows(conn):
         days = item_work_days(item, project)
         if days <= 0:
             continue
-        depth = safe_float(item.get("depth_m"))
+        depth = depth_actual(item)
         end_date = item.get("work_end_date") or item.get("work_start_date") or ""
         rows.append({
             "source_item_id": item["id"],
@@ -729,12 +763,16 @@ def budgeting_context(conn, project, items):
         include_sat = bool(project.get(meta.get("sat_field"))) if meta.get("sat_field") else False
         planned_days = working_days_between(project.get(meta.get("start_field")), project.get(meta.get("end_field")), include_sat) if meta.get("start_field") and meta.get("end_field") else 0
         budget_meters = safe_float(project.get(meta.get("meter_field"))) if meta.get("meter_field") else 0.0
-        logged_meters = round(sum(safe_float(x.get("depth_m")) for x in current_items), 2)
-        meter_basis = budget_meters or logged_meters
+        meter_budget = item_meter_budget(current_items)
+        actual_meters = meter_budget["actual_drilled_meters"]
+        planned_item_meters = meter_budget["planned_item_meters"]
+        meter_basis = planned_item_meters or budget_meters or actual_meters
         avg_items_rate = avg([r["items_per_day"] for r in rows])
         avg_meter_rate = avg([r["meters_per_day"] for r in rows if r["meters_per_day"] is not None])
         estimated_days_by_items = round(len(current_items) / avg_items_rate, 1) if avg_items_rate > 0 and current_items else None
         estimated_days_by_meters = round(meter_basis / avg_meter_rate, 1) if avg_meter_rate > 0 and meter_basis > 0 else None
+        live_meter_days = sum(item_work_days(item, project) for item in current_items if depth_actual(item) > 0)
+        current_meters_per_day = round(actual_meters / live_meter_days, 3) if actual_meters > 0 and live_meter_days > 0 else 0.0
         estimates = [x for x in [estimated_days_by_items, estimated_days_by_meters] if x is not None]
         recommended_days = max(estimates) if estimates else None
         variance = round(planned_days - recommended_days, 1) if planned_days and recommended_days is not None else None
@@ -752,7 +790,10 @@ def budgeting_context(conn, project, items):
             "current_items": len(current_items),
             "planned_days": planned_days,
             "budget_meters": budget_meters,
-            "logged_meters": logged_meters,
+            **meter_budget,
+            "budget_remaining_meters": round(budget_meters - actual_meters, 2) if budget_meters else None,
+            "planned_vs_budget_meters": round(budget_meters - planned_item_meters, 2) if budget_meters else None,
+            "current_meters_per_day": current_meters_per_day,
             "avg_items_per_day": avg_items_rate,
             "avg_meters_per_day": avg_meter_rate,
             "median_days_per_item": percentile([r["work_days"] for r in rows], 0.5),
@@ -940,6 +981,23 @@ def insert_project_item_record(conn, project_id, item_data):
         f"INSERT INTO map_items ({columns_sql}) VALUES ({placeholders})",
         [project_id] + values,
     )
+
+
+def unique_item_id(conn, project_id, item_type, item_id):
+    base = (item_id or "Untitled").strip() or "Untitled"
+    existing = {
+        r["item_id"]
+        for r in conn.execute(
+            "SELECT item_id FROM map_items WHERE project_id=? AND item_type=?",
+            (project_id, item_type),
+        ).fetchall()
+    }
+    if base not in existing:
+        return base
+    n = 2
+    while f"{base} ({n})" in existing:
+        n += 1
+    return f"{base} ({n})"
 
 
 def safe_project_filename(project):
@@ -1175,6 +1233,8 @@ def map_data(pid):
 @app.route("/project/<int:pid>/import_kml", methods=["POST"])
 def import_kml(pid):
     upload = request.files.get("kml_file")
+    import_mode = request.form.get("import_mode", "append").strip()
+    replace_existing = import_mode == "replace"
     if not upload or not upload.filename:
         return redirect(url_for("project", pid=pid, tab="map"))
     try:
@@ -1189,16 +1249,65 @@ def import_kml(pid):
         "INSERT INTO import_backups (project_id, created_at, item_count, backup_json) VALUES (?, ?, ?, ?)",
         (pid, datetime.now().isoformat(timespec="seconds"), len(existing), json.dumps(existing))
     )
-    conn.execute("DELETE FROM map_items WHERE project_id=?", (pid,))
+    if replace_existing:
+        conn.execute("DELETE FROM map_items WHERE project_id=?", (pid,))
+    renamed = 0
     for item in parsed_items:
+        item_id = item["item_id"]
+        if not replace_existing:
+            unique_id = unique_item_id(conn, pid, item["item_type"], item_id)
+            if unique_id != item_id:
+                renamed += 1
+                item_id = unique_id
         conn.execute("""INSERT INTO map_items
         (project_id,item_type,item_id,geometry_type,coords_json,location_plan,planned_amount,status,work_start_date,work_end_date,notes,depth_m)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (pid, item["item_type"], item["item_id"], item["geometry_type"], item["coords_json"], item["location_plan"], item["planned_amount"], item["status"], item["work_start_date"], item["work_end_date"], item["notes"], 0.0))
+        (pid, item["item_type"], item_id, item["geometry_type"], item["coords_json"], item["location_plan"], normalize_planned_amount(item.get("planned_amount")), item["status"], item["work_start_date"], item["work_end_date"], item["notes"], 0.0))
     conn.commit()
     sync_historical_rates(conn)
     conn.close()
-    return redirect(url_for("project", pid=pid, tab="map", notice=f"Imported {len(parsed_items)} map items. Previous map data was backed up."))
+    mode_text = "Replaced map data with" if replace_existing else "Added"
+    suffix = f" {renamed} duplicate IDs were renamed." if renamed else ""
+    return redirect(url_for("project", pid=pid, tab="map", notice=f"{mode_text} {len(parsed_items)} map items. Previous map data was backed up.{suffix}"))
+
+@app.route("/project/<int:pid>/place_item", methods=["POST"])
+def place_item(pid):
+    item_type = request.form.get("item_type", "Borehole").strip() or "Borehole"
+    item_id = request.form.get("item_id", "").strip()
+    lat_raw = request.form.get("lat", "").strip()
+    lng_raw = request.form.get("lng", "").strip()
+    lat = safe_float(lat_raw)
+    lng = safe_float(lng_raw)
+    if not item_id:
+        return jsonify({"ok": False, "error": "Item ID is required."}), 400
+    if lat_raw == "" or lng_raw == "" or lat < -90 or lat > 90 or lng < -180 or lng > 180:
+        return jsonify({"ok": False, "error": "Map click location is missing."}), 400
+    conn = get_db()
+    prow = conn.execute("SELECT * FROM projects WHERE id=?", (pid,)).fetchone()
+    if not prow:
+        conn.close()
+        return jsonify({"ok": False, "error": "Project not found."}), 404
+    item_id = unique_item_id(conn, pid, item_type, item_id)
+    conn.execute("""INSERT INTO map_items
+    (project_id,item_type,item_id,geometry_type,coords_json,location_plan,planned_amount,status,work_start_date,work_end_date,notes,depth_m)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""", (
+        pid,
+        item_type,
+        item_id,
+        "Point",
+        json.dumps([lat, lng]),
+        request.form.get("location_plan", "").strip(),
+        normalize_planned_amount(request.form.get("planned_amount")),
+        clean_status(request.form.get("status", "Planned")),
+        "",
+        "",
+        request.form.get("notes", "").strip(),
+        safe_float(request.form.get("depth_m")),
+    ))
+    conn.commit()
+    sync_historical_rates(conn)
+    conn.close()
+    return jsonify({"ok": True, "item_id": item_id})
 
 @app.route("/project/<int:pid>/restore_import_backup/<int:backup_id>", methods=["POST"])
 def restore_import_backup(pid, backup_id):
@@ -1356,6 +1465,28 @@ def quick_update(item_id):
     sync_historical_rates(conn)
     conn.close()
     return jsonify({"ok": True})
+
+
+@app.route("/item/<int:item_id>/update_location", methods=["POST"])
+def update_location(item_id):
+    lat_raw = request.form.get("lat", "").strip()
+    lng_raw = request.form.get("lng", "").strip()
+    lat = safe_float(lat_raw)
+    lng = safe_float(lng_raw)
+    if lat_raw == "" or lng_raw == "" or lat < -90 or lat > 90 or lng < -180 or lng > 180:
+        return jsonify({"ok": False, "error": "Valid latitude and longitude are required."}), 400
+    conn = get_db()
+    row = conn.execute("SELECT id, project_id, geometry_type FROM map_items WHERE id=?", (item_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({"ok": False, "error": "Item not found."}), 404
+    if row["geometry_type"] != "Point":
+        conn.close()
+        return jsonify({"ok": False, "error": "Only point features can be dragged in this version."}), 400
+    conn.execute("UPDATE map_items SET coords_json=? WHERE id=?", (json.dumps([lat, lng]), item_id))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True, "coords": [lat, lng]})
 
 
 @app.route("/item/<int:item_id>/adjust_dates", methods=["POST"])

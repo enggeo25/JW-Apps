@@ -59,13 +59,18 @@
 </section>
 <section class="compare-grid">
 {% for typ, m in summary['meters'].items() %}
-  {% if m['budget_meters'] or m['logged_meters'] or m['completed_meters'] %}
+  {% if m['budget_meters'] or m['planned_item_meters'] or m['actual_drilled_meters'] or m['completed_meters'] %}
   <div class="compare-card">
-    <div class="section-head"><h3>{{ typ }} metres</h3><span class="pill blue">Metrage</span></div>
-    <div class="compare-lines">
-      <div><span>Budget metres</span><strong>{{ m['budget_meters'] }}</strong></div>
-      <div><span>Logged metres</span><strong>{{ m['logged_meters'] }}</strong></div>
+    <div class="section-head"><h3>{{ typ }} depth bank</h3><span class="pill blue">Per item metres</span></div>
+    <div class="compare-lines polished">
+      <div><span>Total metres allowed</span><strong>{{ m['budget_meters'] }}</strong></div>
+      <div><span>Planned item metres</span><strong>{{ m['planned_item_meters'] }}</strong></div>
+      <div><span>Actual drilled metres</span><strong>{{ m['actual_drilled_meters'] }}</strong></div>
+      <div><span>Remaining to planned</span><strong>{{ m['remaining_to_planned_depth'] }}</strong></div>
+      <div><span>Over-drilled metres</span><strong>{{ m['over_drilled_meters'] }}</strong></div>
+      <div><span>Net metres in bank</span><strong>{{ m['net_meter_bank'] }}</strong></div>
       <div><span>Completed metres</span><strong>{{ m['completed_meters'] }}</strong></div>
+      <div><span>Budget remaining</span><strong>{{ m['budget_remaining_meters'] if m['budget_remaining_meters'] is not none else '-' }}</strong></div>
     </div>
   </div>
   {% endif %}
@@ -116,6 +121,8 @@
       <div><span>Recommended days</span><strong>{{ c['recommended_days'] if c['recommended_days'] is not none else '-' }}</strong></div>
       <div><span>Avg items/day</span><strong>{{ c['avg_items_per_day'] }}</strong></div>
       <div><span>Avg metres/day</span><strong>{{ c['avg_meters_per_day'] }}</strong></div>
+      <div><span>Metres in bank</span><strong>{{ c['net_meter_bank'] }}</strong></div>
+      <div><span>Current m/day</span><strong>{{ c['current_meters_per_day'] }}</strong></div>
     </div>
   </article>
 {% endfor %}
@@ -165,6 +172,14 @@
       <div><span>Estimate by metres</span><strong>{{ c['estimated_days_by_meters'] if c['estimated_days_by_meters'] is not none else '-' }}</strong></div>
       <div><span>Recommended days</span><strong>{{ c['recommended_days'] if c['recommended_days'] is not none else '-' }}</strong></div>
       <div><span>Plan variance</span><strong>{{ c['variance_days'] if c['variance_days'] is not none else '-' }}</strong></div>
+      <div><span>Total metres allowed</span><strong>{{ c['budget_meters'] }}</strong></div>
+      <div><span>Planned item metres</span><strong>{{ c['planned_item_meters'] }}</strong></div>
+      <div><span>Actual drilled metres</span><strong>{{ c['actual_drilled_meters'] }}</strong></div>
+      <div><span>Remaining to planned</span><strong>{{ c['remaining_to_planned_depth'] }}</strong></div>
+      <div><span>Over-drilled metres</span><strong>{{ c['over_drilled_meters'] }}</strong></div>
+      <div><span>Net metres in bank</span><strong>{{ c['net_meter_bank'] }}</strong></div>
+      <div><span>Current m/day</span><strong>{{ c['current_meters_per_day'] }}</strong></div>
+      <div><span>Budget remaining</span><strong>{{ c['budget_remaining_meters'] if c['budget_remaining_meters'] is not none else '-' }}</strong></div>
     </div>
   </article>
 {% endfor %}
@@ -302,12 +317,12 @@
     <input type="hidden" id="cal_item_type" name="item_type">
     <label><span>Item ID</span><input id="cal_item_id" name="item_id"></label>
     <label><span>Status</span><select id="cal_status" name="status">{% for s in statuses %}<option value="{{ s }}">{{ s }}</option>{% endfor %}</select></label>
-    <label><span>Depth / metres</span><input id="cal_depth_m" name="depth_m" type="number" step="0.01"></label>
+    <label><span>Planned depth / metres</span><input id="cal_planned_amount" name="planned_amount" type="number" step="0.01"></label>
+    <label><span>Actual drilled depth</span><input id="cal_depth_m" name="depth_m" type="number" step="0.01"></label>
     <label><span>Work start</span><input id="cal_work_start" name="work_start_date" type="date"></label>
     <label><span>Work end</span><input id="cal_work_end" name="work_end_date" type="date"></label>
     <label><span>Notes</span><textarea id="cal_notes" name="notes" rows="4"></textarea></label>
     <input type="hidden" id="cal_location_plan" name="location_plan" value="">
-    <input type="hidden" id="cal_planned_amount" name="planned_amount" value="1">
     <button type="submit">Save calendar item</button>
   </form>
 
@@ -347,6 +362,10 @@
 <h3>Map controls</h3>
 <form method="post" action="{{ url_for('import_kml', pid=project['id']) }}" enctype="multipart/form-data" class="map-import-form">
 <input type="file" name="kml_file" accept=".kml,.kmz" required>
+<select name="import_mode" aria-label="Import mode">
+  <option value="append">Add to existing map</option>
+  <option value="replace">Replace map data</option>
+</select>
 <button type="submit">Import KML / KMZ</button>
 </form>
 <div class="map-controls vertical">
@@ -383,6 +402,17 @@
 </form>
 </div>
 <div class="sidebar-section">
+<h4>Place new point</h4>
+<form id="placePointForm" class="form-grid one">
+<label><span>Type</span><select id="place_item_type" name="item_type">{% for t in types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}</select></label>
+<label><span>Item ID</span><input id="place_item_id" name="item_id" placeholder="BH11"></label>
+<label><span>Planned depth / metres</span><input id="place_planned_amount" name="planned_amount" type="number" step="0.01"></label>
+<label><span>Actual drilled depth</span><input id="place_depth_m" name="depth_m" type="number" step="0.01"></label>
+<button type="button" id="startPlacePointBtn">Click Map To Place</button>
+</form>
+<div id="mapEditStatus" class="selection-summary muted">Normal selection mode.</div>
+</div>
+<div class="sidebar-section">
 <h4>Single item editor</h4>
 <div id="singleEditorEmpty" class="muted">Select one feature to edit it here.</div>
 <form id="singleEditorForm" class="hidden">
@@ -390,12 +420,13 @@
 <label><span>Type</span><select id="item_type" name="item_type">{% for t in types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}</select></label>
 <label><span>Item ID</span><input id="item_id" name="item_id"></label>
 <label><span>Location Plan</span><input id="location_plan" name="location_plan"></label>
-<label><span>Depth / metres</span><input id="depth_m" name="depth_m" type="number" step="0.01"></label><input type="hidden" id="planned_amount" name="planned_amount" value="1">
+<label><span>Planned depth / metres</span><input id="planned_amount" name="planned_amount" type="number" step="0.01"></label>
+<label><span>Actual drilled depth</span><input id="depth_m" name="depth_m" type="number" step="0.01"></label>
 <label><span>Status</span><select id="status" name="status">{% for s in statuses %}<option value="{{ s }}">{{ s }}</option>{% endfor %}</select></label>
 <label><span>Work start</span><input id="work_start_date" name="work_start_date" type="date"></label>
 <label><span>Work end</span><input id="work_end_date" name="work_end_date" type="date"></label>
 <label><span>Notes</span><textarea id="notes" name="notes" rows="4"></textarea></label>
-<button type="button" id="saveSingleBtn">Save item</button>
+<div class="inline-actions"><button type="button" id="saveSingleBtn">Save item</button><button type="button" class="button secondary" id="movePointBtn">Move location</button></div>
 </form>
 </div>
 </aside>
@@ -409,7 +440,8 @@
 <label><span>Type</span><select name="item_type">{% for t in types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}</select></label>
 <label><span>Item ID</span><input name="item_id" required></label>
 <label><span>Location plan</span><input name="location_plan"></label>
-<label><span>Depth / metres</span><input name="depth_m" type="number" step="0.01" value="0"></label><input type="hidden" name="planned_amount" value="1">
+<label><span>Planned depth / metres</span><input name="planned_amount" type="number" step="0.01" value=""></label>
+<label><span>Actual drilled depth</span><input name="depth_m" type="number" step="0.01" value=""></label>
 <label><span>Status</span><select name="status">{% for s in statuses %}<option value="{{ s }}">{{ s }}</option>{% endfor %}</select></label>
 <label><span>Work start</span><input name="work_start_date" type="date"></label>
 <label><span>Work end</span><input name="work_end_date" type="date"></label>
@@ -424,7 +456,7 @@
 <label><span>Prefix</span><input name="prefix" placeholder="BH / CPT / SCPT / TP / ERT"></label>
 <label><span>Start number</span><input name="start_no" type="number" value="1"></label>
 <label><span>End number</span><input name="end_no" type="number" value="8"></label>
-<label><span>Default depth / metres</span><input name="default_planned_amount" type="number" step="0.01" value="0"></label>
+<label><span>Default planned depth / metres</span><input name="default_planned_amount" type="number" step="0.01" value="45"></label>
 <label><span>Status</span><select name="status">{% for s in statuses %}<option value="{{ s }}">{{ s }}</option>{% endfor %}</select></label>
 <div class="full"><button type="submit">Mass add</button></div>
 </form>
@@ -448,7 +480,7 @@
 {% if rows %}
 <div class="table-wrap">
 <table class="stable-table">
-<thead><tr><th><input type="checkbox" onclick="toggleGroup(this, '{{ group_keys[typ] }}')"></th><th>Type</th><th>ID</th><th>Geometry</th><th>Location</th><th>Status</th><th>Depth m</th><th>Work start</th><th>Work end</th><th>History</th><th>Edit</th></tr></thead>
+<thead><tr><th><input type="checkbox" onclick="toggleGroup(this, '{{ group_keys[typ] }}')"></th><th>Type</th><th>ID</th><th>Geometry</th><th>Location</th><th>Status</th><th>Planned m</th><th>Actual m</th><th>Work start</th><th>Work end</th><th>History</th><th>Edit</th></tr></thead>
 <tbody>
 {% for i in rows %}
 <tr data-row-id="{{ i['id'] }}">
@@ -458,6 +490,7 @@
 <td>{{ i['geometry_type'] }}</td>
 <td class="editable" data-field="location_plan" data-id="{{ i['id'] }}">{{ i['location_plan'] }}</td>
 <td class="editable status-{{ i['status_color'] }}" data-field="status" data-id="{{ i['id'] }}">{{ i['status'] }}</td>
+<td class="editable" data-field="planned_amount" data-id="{{ i['id'] }}">{{ i['planned_amount'] }}</td>
 <td class="editable" data-field="depth_m" data-id="{{ i['id'] }}">{{ i['depth_m'] }}</td>
 <td class="editable" data-field="work_start_date" data-id="{{ i['id'] }}">{{ i['work_start_date'] }}</td>
 <td class="editable" data-field="work_end_date" data-id="{{ i['id'] }}">{{ i['work_end_date'] }}</td>
@@ -473,13 +506,14 @@
 <td><button class="small" type="button" onclick="openInlineEditor({{ i['id'] }})">Edit</button></td>
 </tr>
 <tr id="editor_{{ i['id'] }}" class="inline-editor-row hidden">
-<td colspan="11">
+<td colspan="12">
 <form method="post" action="{{ url_for('update_item', item_id=i['id']) }}" class="inline-editor-grid">
 <input type="hidden" name="next_tab" value="data">
 <label><span>Type</span><select name="item_type">{% for t in types %}<option value="{{ t }}" {% if t == i['item_type'] %}selected{% endif %}>{{ t }}</option>{% endfor %}</select></label>
 <label><span>Item ID</span><input name="item_id" value="{{ i['item_id'] }}"></label>
 <label><span>Location Plan</span><input name="location_plan" value="{{ i['location_plan'] }}"></label>
-<label><span>Depth / metres</span><input name="depth_m" type="number" step="0.01" value="{{ i['depth_m'] }}"></label><input type="hidden" name="planned_amount" value="{{ i['planned_amount'] }}">
+<label><span>Planned depth / metres</span><input name="planned_amount" type="number" step="0.01" value="{{ i['planned_amount'] }}"></label>
+<label><span>Actual drilled depth</span><input name="depth_m" type="number" step="0.01" value="{{ i['depth_m'] }}"></label>
 <label><span>Status</span><select name="status">{% for s in statuses %}<option value="{{ s }}" {% if s == i['status'] %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
 <label><span>Work start</span><input name="work_start_date" type="date" value="{{ i['work_start_date'] }}"></label>
 <label><span>Work end</span><input name="work_end_date" type="date" value="{{ i['work_end_date'] }}"></label>
@@ -533,7 +567,7 @@ async function quickEditCell(td){
     opts.forEach(v => { const o = document.createElement('option'); o.value = v; o.textContent = v; if (v === oldValue) o.selected = true; input.appendChild(o); });
   } else {
     input = document.createElement('input');
-    input.type = field.includes('date') ? 'date' : (field === 'depth_m' ? 'number' : 'text');
+    input.type = field.includes('date') ? 'date' : (field === 'depth_m' || field === 'planned_amount' ? 'number' : 'text');
     input.value = oldValue;
   }
   input.style.width = width;
@@ -703,6 +737,16 @@ L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/
 const featureLayer = L.featureGroup().addTo(map);
 const itemsById = {}, pointLayerById = {}, lineLayerById = {}, labelLayerById = {};
 let selectedIds = [];
+let mapMode = 'select';
+let moveItemId = null;
+let movedLatLng = null;
+const mapEditStatus = document.getElementById('mapEditStatus');
+function setMapStatus(message){ if (mapEditStatus) mapEditStatus.textContent = message; }
+function setMapMode(mode){
+  mapMode = mode;
+  map.getContainer().classList.toggle('map-place-mode', mode === 'place');
+  map.getContainer().classList.toggle('map-move-mode', mode === 'move');
+}
 function colorForStatus(status, fallback){ const m={"Planned":"#eab308","In Progress":"#f97316","Completed":"#22c55e","Delayed":"#ef4444","Skipped":"#9ca3af"}; return m[status] || fallback || "#9ca3af"; }
 function svgIcon(item, selected=false){
   const meta = METHOD_MAP[item.item_type] || {};
@@ -716,7 +760,22 @@ function svgIcon(item, selected=false){
 }
 function lineStyle(item, selected=false){ const meta = METHOD_MAP[item.item_type] || {}; return { color: colorForStatus(item.status, meta.color), weight: selected ? 8 : 4, opacity: 1.0 }; }
 function isSelected(id){ return selectedIds.includes(id); }
-function toggleSelect(id){ if (isSelected(id)) selectedIds = selectedIds.filter(x => x !== id); else selectedIds.push(id); refreshSelectionView(); redrawStyles(); }
+function stopMovingPoint(save){
+  if (!moveItemId) return;
+  const marker = pointLayerById[moveItemId];
+  if (marker && marker.dragging) marker.dragging.disable();
+  if (!save && marker && itemsById[moveItemId]?.coords) marker.setLatLng(itemsById[moveItemId].coords);
+  moveItemId = null;
+  movedLatLng = null;
+  setMapMode('select');
+  setMapStatus('Normal selection mode.');
+}
+function toggleSelect(id){
+  if (mapMode === 'move') return;
+  if (isSelected(id)) selectedIds = selectedIds.filter(x => x !== id); else selectedIds.push(id);
+  refreshSelectionView();
+  redrawStyles();
+}
 function refreshSelectionView(){
   document.getElementById("selectedIdsInput").value = JSON.stringify(selectedIds);
   if (selectedIds.length === 0){
@@ -765,6 +824,70 @@ document.getElementById("saveSingleBtn").addEventListener("click", () => {
   });
   const nextTab = document.createElement("input"); nextTab.type = "hidden"; nextTab.name = "next_tab"; nextTab.value = "map"; form.appendChild(nextTab);
   document.body.appendChild(form); form.submit();
+});
+document.getElementById("movePointBtn").addEventListener("click", async () => {
+  if (selectedIds.length !== 1) { setMapStatus('Select one point first.'); return; }
+  const id = selectedIds[0];
+  const item = itemsById[id];
+  const marker = pointLayerById[id];
+  if (!item || item.geometry_type !== 'Point' || !marker) { setMapStatus('Only point features can be moved here.'); return; }
+  if (mapMode === 'move' && moveItemId === id) {
+    if (!movedLatLng) { stopMovingPoint(false); return; }
+    const form = new FormData();
+    form.append('lat', String(movedLatLng.lat));
+    form.append('lng', String(movedLatLng.lng));
+    const res = await fetch(`/item/${id}/update_location`, { method:'POST', body:form });
+    if (res.ok) {
+      item.coords = [movedLatLng.lat, movedLatLng.lng];
+      marker.setLatLng(item.coords);
+      setMapStatus(`Saved new location for ${item.item_id}.`);
+      stopMovingPoint(true);
+    } else {
+      setMapStatus('Could not save location. Try again.');
+    }
+    return;
+  }
+  stopMovingPoint(false);
+  moveItemId = id;
+  movedLatLng = marker.getLatLng();
+  setMapMode('move');
+  marker.dragging.enable();
+  marker.once('dragstart', () => setMapStatus('Drag the point, then click Move location again to save.'));
+  marker.on('dragend', () => { movedLatLng = marker.getLatLng(); setMapStatus('Location changed. Click Move location again to save.'); });
+  setMapStatus(`Move mode for ${item.item_id}. Drag the point, then click Move location again to save.`);
+});
+document.getElementById("startPlacePointBtn").addEventListener("click", () => {
+  const itemId = (document.getElementById("place_item_id").value || "").trim();
+  if (!itemId) { setMapStatus('Enter an item ID before placing the point.'); return; }
+  stopMovingPoint(false);
+  selectedIds = [];
+  refreshSelectionView();
+  redrawStyles();
+  setMapMode('place');
+  setMapStatus('Place mode active. Click the map where the new point must go.');
+});
+map.on('click', async e => {
+  if (mapMode !== 'place') {
+    selectedIds = [];
+    refreshSelectionView();
+    redrawStyles();
+    return;
+  }
+  const form = new FormData();
+  form.append('item_type', document.getElementById("place_item_type").value);
+  form.append('item_id', document.getElementById("place_item_id").value);
+  form.append('planned_amount', document.getElementById("place_planned_amount").value);
+  form.append('depth_m', document.getElementById("place_depth_m").value);
+  form.append('lat', String(e.latlng.lat));
+  form.append('lng', String(e.latlng.lng));
+  const res = await fetch(`/project/${projectId}/place_item`, { method:'POST', body:form });
+  if (res.ok) {
+    setMapStatus('Point placed and saved. Reloading map.');
+    window.location.reload();
+  } else {
+    const data = await res.json().catch(() => ({}));
+    setMapStatus(data.error || 'Could not place point.');
+  }
 });
 window.addEventListener("load", () => {
   const sy = localStorage.getItem(`map_page_scroll_${projectId}`);
