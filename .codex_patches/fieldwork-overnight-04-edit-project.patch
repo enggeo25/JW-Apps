@@ -1,0 +1,19 @@
+diff --git a/fieldwork_app_review_copy/templates/edit_project.html b/fieldwork_app_review_copy/templates/edit_project.html
+--- a/fieldwork_app_review_copy/templates/edit_project.html
++++ b/fieldwork_app_review_copy/templates/edit_project.html
+@@ -2,6 +2,7 @@
+ {% block content %}
+ <section class="card">
+ <div class="section-head"><h2>Edit Project</h2><a class="button secondary" href="{{ url_for('project', pid=project['id'], tab='overview') }}">Back</a></div>
++{% if request.args.get('error') %}<div class="notice error">{{ request.args.get('error') }}</div>{% endif %}
+ <form method="post" class="form-grid">
+ <label><span>Project name</span><input name="name" value="{{ project['name'] }}"></label>
+ <label><span>Project number</span><input name="project_number" value="{{ project['project_number'] }}"></label>
+@@ -52,6 +53,7 @@
+ 
+ <section class="full method-selector-card">
+   <h3>Custom test methods</h3>
++  <p class="meta">Custom methods currently appear in Map and Data Management. Built-in methods carry planning, calendar, and budgeting fields.</p>
+   <div id="customMethods">
+     {% for cm in project['custom_methods'] %}
+     <div class="custom-method-row">
