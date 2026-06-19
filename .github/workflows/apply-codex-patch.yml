@@ -30,7 +30,7 @@ jobs:
           fi
           for patch_file in "${patch_files[@]}"; do
             echo "Applying $patch_file"
-            git apply --whitespace=fix "$patch_file"
+            git apply --recount --whitespace=fix "$patch_file"
             rm "$patch_file"
           done
           rmdir .codex_patches 2>/dev/null || true
@@ -45,3 +45,4 @@ jobs:
           git push
 
 # Codex trigger: apply pending fieldwork patches.
+# Codex trigger: recount hunk headers and apply pending fieldwork patches.
