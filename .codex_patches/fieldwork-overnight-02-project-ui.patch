@@ -1,0 +1,302 @@
+diff --git a/fieldwork_app_review_copy/templates/project.html b/fieldwork_app_review_copy/templates/project.html
+--- a/fieldwork_app_review_copy/templates/project.html
++++ b/fieldwork_app_review_copy/templates/project.html
+@@ -31,7 +31,7 @@
+ {% if tab == 'overview' %}
+ <section class="hero-code {{ summary['overall_class'] }}">
+ <div><span class="code-label">Overall Code</span><div class="code-value">{{ summary['overall_code'] }}</div><p>{{ summary['overall_text'] }}</p></div>
+-<div class="hero-mini"><div><span>Average completion</span><strong>{{ summary['overall_avg'] }}%</strong></div><div><span>Active items</span><strong>{{ summary['total'] }}</strong></div><div><span>Skipped excluded</span><strong>{{ summary['skipped'] }}</strong></div></div>
++<div class="hero-mini"><div><span>Average completion</span><strong>{{ summary['overall_avg'] }}%</strong></div><div><span>Non-skipped items</span><strong>{{ summary['total'] }}</strong></div><div><span>Skipped excluded</span><strong>{{ summary['skipped'] }}</strong></div></div>
+ </section>
+ <section class="compare-grid">
+ {% for typ, d in summary['detail'].items() %}
+@@ -47,8 +47,8 @@
+   <div><span>Days used</span><strong>{{ d['completed_days'] }}</strong></div>
+   <div><span>Days left</span><strong>{{ d['days_left'] }}</strong></div>
+ 
+-  <div><span>Current rate</span><strong>{{ d['current_rate'] }}</strong></div>
+-  <div><span>Target rate</span><strong>{{ d['target_rate'] }}</strong></div>
++  <div><span>Current items/day</span><strong>{{ d['current_rate'] }}</strong></div>
++  <div><span>Target items/day</span><strong>{{ d['target_rate'] }}</strong></div>
+ 
+   <div><span>Budget days</span><strong>{{ d['budget_days'] }}</strong></div>
+   <div><span>Projected days</span><strong>{{ d['projected_days_needed'] if d['projected_days_needed'] is not none else '-' }}</strong></div>
+@@ -65,8 +65,9 @@
+     <div class="compare-lines polished">
+       <div><span>Total metres allowed</span><strong>{{ m['budget_meters'] }}</strong></div>
+       <div><span>Planned item metres</span><strong>{{ m['planned_item_meters'] }}</strong></div>
++      <div><span>Started planned metres</span><strong>{{ m['planned_started_meters'] }}</strong></div>
+       <div><span>Actual drilled metres</span><strong>{{ m['actual_drilled_meters'] }}</strong></div>
+-      <div><span>Remaining to planned</span><strong>{{ m['remaining_to_planned_depth'] }}</strong></div>
++      <div><span>Remaining on started</span><strong>{{ m['remaining_to_planned_depth'] }}</strong></div>
+       <div><span>Over-drilled metres</span><strong>{{ m['over_drilled_meters'] }}</strong></div>
+       <div><span>Net metres in bank</span><strong>{{ m['net_meter_bank'] }}</strong></div>
+       <div><span>Completed metres</span><strong>{{ m['completed_meters'] }}</strong></div>
+@@ -86,7 +87,7 @@
+     <div class="bar-track"><div class="bar-fill green-fill" style="width: {{ dashboard['completion_pct'] }}%"></div></div>
+   </article>
+   <article class="kpi-card">
+-    <span>Active Items</span>
++    <span>Non-skipped Items</span>
+     <strong>{{ dashboard['active_total'] }}</strong>
+     <small>{{ dashboard['skipped'] }} skipped excluded</small>
+   </article>
+@@ -107,7 +108,7 @@
+ <div class="compare-lines polished">
+   <div><span>Planned days</span><strong>{{ dashboard['planned_total_days'] }}</strong></div>
+   <div><span>Recommended days</span><strong>{{ dashboard['recommended_total_days'] }}</strong></div>
+-  <div><span>Variance days</span><strong>{{ dashboard['variance_days'] if dashboard['variance_days'] is not none else '-' }}</strong></div>
++  <div><span>Days buffer/shortfall</span><strong>{{ dashboard['variance_days'] if dashboard['variance_days'] is not none else '-' }}</strong></div>
+   <div><span>Historical records</span><strong>{{ budget['history']|length }}</strong></div>
+ </div>
+ </section>
+@@ -171,11 +172,12 @@
+       <div><span>Estimate by items</span><strong>{{ c['estimated_days_by_items'] if c['estimated_days_by_items'] is not none else '-' }}</strong></div>
+       <div><span>Estimate by metres</span><strong>{{ c['estimated_days_by_meters'] if c['estimated_days_by_meters'] is not none else '-' }}</strong></div>
+       <div><span>Recommended days</span><strong>{{ c['recommended_days'] if c['recommended_days'] is not none else '-' }}</strong></div>
+-      <div><span>Plan variance</span><strong>{{ c['variance_days'] if c['variance_days'] is not none else '-' }}</strong></div>
++      <div><span>Days buffer/shortfall</span><strong>{{ c['variance_days'] if c['variance_days'] is not none else '-' }}</strong></div>
+       <div><span>Total metres allowed</span><strong>{{ c['budget_meters'] }}</strong></div>
+       <div><span>Planned item metres</span><strong>{{ c['planned_item_meters'] }}</strong></div>
++      <div><span>Started planned metres</span><strong>{{ c['planned_started_meters'] }}</strong></div>
+       <div><span>Actual drilled metres</span><strong>{{ c['actual_drilled_meters'] }}</strong></div>
+-      <div><span>Remaining to planned</span><strong>{{ c['remaining_to_planned_depth'] }}</strong></div>
++      <div><span>Remaining on started</span><strong>{{ c['remaining_to_planned_depth'] }}</strong></div>
+       <div><span>Over-drilled metres</span><strong>{{ c['over_drilled_meters'] }}</strong></div>
+       <div><span>Net metres in bank</span><strong>{{ c['net_meter_bank'] }}</strong></div>
+       <div><span>Current m/day</span><strong>{{ c['current_meters_per_day'] }}</strong></div>
+@@ -210,7 +212,8 @@
+ </section>
+ 
+ <section class="card">
+-<div class="section-head"><h3>Historical Rate Dataset</h3><span class="pill blue">{{ budget['history']|length }} completed records</span></div>
++{% set shown_history = 30 if budget['history']|length > 30 else budget['history']|length %}
++<div class="section-head"><h3>Historical Rate Dataset</h3><span class="pill blue">Showing {{ shown_history }} of {{ budget['history']|length }} completed records</span></div>
+ <div class="table-wrap">
+ <table>
+ <thead><tr><th>Project</th><th>Type</th><th>Item</th><th>Start</th><th>End</th><th>Work days</th><th>Depth m</th><th>Items/day</th><th>Metres/day</th></tr></thead>
+@@ -246,7 +249,7 @@
+ </div>
+ <div class="subtabbar">
+   <a class="subtab {% if calview=='planning' %}active{% endif %}" href="{{ url_for('project', pid=project['id'], tab='calendar', year=cal_year, month=cal_month, calview='planning') }}">Planning Calendar</a>
+-  <a class="subtab {% if calview=='active' %}active{% endif %}" href="{{ url_for('project', pid=project['id'], tab='calendar', year=cal_year, month=cal_month, calview='active') }}">Active Calendar</a>
++  <a class="subtab {% if calview=='active' %}active{% endif %}" href="{{ url_for('project', pid=project['id'], tab='calendar', year=cal_year, month=cal_month, calview='active') }}">Work Dates</a>
+   <a class="subtab {% if calview=='combined' %}active{% endif %}" href="{{ url_for('project', pid=project['id'], tab='calendar', year=cal_year, month=cal_month, calview='combined') }}">Combined Calendar</a>
+ </div>
+ 
+@@ -257,7 +260,8 @@
+       <button type="button" class="legend-pill legend-filter active type-{{ m['name']|lower|replace(' ', '') }}" data-filter-type="{{ m['name']|lower|replace(' ', '') }}">{{ m['name'] }}</button>
+       {% endfor %}
+       <button type="button" class="legend-pill legend-filter active legend-plan" data-filter-kind="planned">Planned</button>
+-      <button type="button" class="legend-pill legend-filter active legend-actual" data-filter-kind="actual">Active</button>
++      <button type="button" class="legend-pill legend-filter active legend-actual" data-filter-kind="actual">Work dates</button>
++      <label class="checkbox-inline calendar-drag-toggle"><input id="enableCalendarDrag" type="checkbox"><span>Enable drag date changes</span></label>
+     </div>
+ 
+     {% for weekrow in calctx['week_rows'] %}
+@@ -295,7 +299,7 @@
+         {% if calview == 'planning' and not weekrow['planned_rows'] %}
+           <div class="calendar-empty-row">No planned items this week.</div>
+         {% elif calview == 'active' and not weekrow['actual_rows'] %}
+-          <div class="calendar-empty-row">No active items this week.</div>
++          <div class="calendar-empty-row">No work-dated items this week.</div>
+         {% elif calview == 'combined' and not weekrow['planned_rows'] and not weekrow['actual_rows'] %}
+           <div class="calendar-empty-row">No items this week.</div>
+         {% endif %}
+@@ -346,8 +350,8 @@
+ <div><span>Completed</span><strong>{{ d['completed'] }}</strong></div>
+ <div><span>Remaining</span><strong>{{ d['remaining'] }}</strong></div>
+ <div><span>Days left</span><strong>{{ d['days_left'] }}</strong></div>
+-<div><span>Current rate</span><strong>{{ d['current_rate'] }}</strong></div>
+-<div><span>Target rate</span><strong>{{ d['target_rate'] }}</strong></div>
++<div><span>Current items/day</span><strong>{{ d['current_rate'] }}</strong></div>
++<div><span>Target items/day</span><strong>{{ d['target_rate'] }}</strong></div>
+ <div><span>Projected days needed</span><strong>{{ d['projected_days_needed'] if d['projected_days_needed'] is not none else '-' }}</strong></div>
+ </div>
+ </div>
+@@ -360,11 +364,11 @@
+ <aside class="card map-sidebar">
+ <div class="sidebar-section">
+ <h3>Map controls</h3>
+-<form method="post" action="{{ url_for('import_kml', pid=project['id']) }}" enctype="multipart/form-data" class="map-import-form">
++<form method="post" action="{{ url_for('import_kml', pid=project['id']) }}" enctype="multipart/form-data" class="map-import-form" id="mapImportForm">
+ <input type="file" name="kml_file" accept=".kml,.kmz" required>
+-<select name="import_mode" aria-label="Import mode">
++<select name="import_mode" aria-label="Import mode" id="mapImportMode">
+   <option value="append">Add to existing map</option>
+-  <option value="replace">Replace map data</option>
++  <option value="replace">Replace all current map features</option>
+ </select>
+ <button type="submit">Import KML / KMZ</button>
+ </form>
+@@ -375,7 +379,7 @@
+ </div>
+ </div>
+ <div class="sidebar-section">
+-<h3>Import backups</h3>
++<h3>Map backups</h3>
+ {% if backups %}
+   {% for b in backups %}
+   <form method="post" action="{{ url_for('restore_import_backup', pid=project['id'], backup_id=b['id']) }}" onsubmit="return confirm('Restore this map import backup? Current map data will be backed up first.');" class="backup-row">
+@@ -384,7 +388,7 @@
+   </form>
+   {% endfor %}
+ {% else %}
+-  <p class="empty">No import backups yet.</p>
++  <p class="empty">No map backups yet.</p>
+ {% endif %}
+ </div>
+ <div class="sidebar-section">
+@@ -392,7 +396,7 @@
+ <div id="selectionSummary" class="selection-summary">No items selected.</div>
+ <form method="post" action="{{ url_for('delete_map_items', pid=project['id']) }}" id="deleteMapItemsForm" onsubmit="return confirmDeleteSelectedMapItems();">
+ <input type="hidden" name="selected_ids_json" id="deleteSelectedIdsInput">
+-<button type="submit" class="danger">Delete selected feature(s)</button>
++<button type="submit" class="danger" id="deleteSelectedMapBtn" disabled>Delete selected feature(s)</button>
+ </form>
+ </div>
+ <div class="sidebar-section">
+@@ -542,6 +546,9 @@
+ const METHOD_DEFS = {{ method_defs|tojson }};
+ const PROJECT_DATA = {{ project|tojson }};
+ const METHOD_MAP = Object.fromEntries(METHOD_DEFS.map(m => [m.name, m]));
++function escapeHtml(value){
++  return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
++}
+ function openInlineEditor(id){ document.getElementById(`editor_${id}`).classList.remove("hidden"); localStorage.setItem("dataScrollY", window.scrollY); }
+ function closeInlineEditor(id){ document.getElementById(`editor_${id}`).classList.add("hidden"); }
+ function toggleGroup(master, cls){ document.querySelectorAll('.' + cls).forEach(cb => cb.checked = master.checked); }
+@@ -553,7 +560,20 @@
+ if (window.location.search.includes('tab=data')) {
+   const y = localStorage.getItem('dataScrollY');
+   if (y) setTimeout(() => window.scrollTo(0, parseInt(y)), 20);
+-  document.getElementById('bulkForm')?.addEventListener('submit', () => localStorage.setItem('dataScrollY', window.scrollY));
++  document.getElementById('bulkForm')?.addEventListener('submit', e => {
++    localStorage.setItem('dataScrollY', window.scrollY);
++    const form = e.currentTarget;
++    const action = form.querySelector('[name="bulk_action"]')?.value || '';
++    const selected = form.querySelectorAll('input[name="selected_ids"]:checked').length;
++    if (!selected) {
++      alert('Select at least one item first.');
++      e.preventDefault();
++      return;
++    }
++    if (action === 'delete' && !confirm(`Delete ${selected} selected item(s)? A map backup will be saved first.`)) {
++      e.preventDefault();
++    }
++  });
+ }
+ async function quickEditCell(td){
+   const field = td.dataset.field;
+@@ -676,6 +696,7 @@
+     bar.dataset.dragBound = '1';
+     bar.addEventListener('pointerdown', async (e) => {
+       if (e.button !== 0) return;
++      if (!document.getElementById('enableCalendarDrag')?.checked) return;
+       const row = bar.closest('.week-bar-row');
+       if (!row) return;
+       const rect = bar.getBoundingClientRect();
+@@ -699,7 +720,15 @@
+         const dy = ev.clientY - startY;
+         const weekDelta = Math.round(dy / weekHeight);
+         const delta = Math.round(dx / cellWidth) + (weekDelta * 7);
+-        if (!moved || delta === 0) return;
++        if (!moved || delta === 0) {
++          setTimeout(() => { bar.dataset.dragging = '0'; }, 50);
++          return;
++        }
++        const itemLabel = bar.dataset.itemLabel || 'this item';
++        if (!confirm(`Save date change for ${itemLabel}?`)) {
++          setTimeout(() => { bar.dataset.dragging = '0'; }, 50);
++          return;
++        }
+         const form = new FormData();
+         form.append('mode', mode);
+         form.append('delta', String(delta));
+@@ -732,7 +761,18 @@
+ const map = L.map('map', { zoomControl: true, preferCanvas: true, scrollWheelZoom: true });
+ const savedCenter = localStorage.getItem(`map_center_${projectId}`);
+ const savedZoom = localStorage.getItem(`map_zoom_${projectId}`);
+-if (savedCenter && savedZoom) { const c = JSON.parse(savedCenter); map.setView(c, parseInt(savedZoom)); } else { map.setView([-29.0, 24.0], 5); }
++let restoredMapView = false;
++if (savedCenter && savedZoom) {
++  try {
++    const c = JSON.parse(savedCenter);
++    map.setView(c, parseInt(savedZoom));
++    restoredMapView = true;
++  } catch (err) {
++    localStorage.removeItem(`map_center_${projectId}`);
++    localStorage.removeItem(`map_zoom_${projectId}`);
++  }
++}
++if (!restoredMapView) map.setView([-29.0, 24.0], 5);
+ map.on('moveend zoomend', () => {
+   localStorage.setItem(`map_center_${projectId}`, JSON.stringify([map.getCenter().lat, map.getCenter().lng]));
+   localStorage.setItem(`map_zoom_${projectId}`, map.getZoom());
+@@ -751,6 +791,12 @@
+   map.getContainer().classList.toggle('map-place-mode', mode === 'place');
+   map.getContainer().classList.toggle('map-move-mode', mode === 'move');
+ }
++document.getElementById('mapImportForm')?.addEventListener('submit', e => {
++  const mode = document.getElementById('mapImportMode')?.value || 'append';
++  if (mode === 'replace' && !confirm('Replace all current map features? A restore backup will be saved first.')) {
++    e.preventDefault();
++  }
++});
+ function colorForStatus(status, fallback){ const m={"Planned":"#eab308","In Progress":"#f97316","Completed":"#22c55e","Delayed":"#ef4444","Skipped":"#9ca3af"}; return m[status] || fallback || "#9ca3af"; }
+ function svgIcon(item, selected=false){
+   const meta = METHOD_MAP[item.item_type] || {};
+@@ -783,14 +829,19 @@
+ function refreshSelectionView(){
+   document.getElementById("selectedIdsInput").value = JSON.stringify(selectedIds);
+   document.getElementById("deleteSelectedIdsInput").value = JSON.stringify(selectedIds);
++  const deleteSelectedBtn = document.getElementById("deleteSelectedMapBtn");
++  if (deleteSelectedBtn) {
++    deleteSelectedBtn.disabled = selectedIds.length === 0;
++    deleteSelectedBtn.textContent = selectedIds.length ? `Delete selected (${selectedIds.length})` : 'Delete selected feature(s)';
++  }
+   if (selectedIds.length === 0){
+-    document.getElementById("selectionSummary").innerHTML = "No items selected.";
++    document.getElementById("selectionSummary").textContent = "No items selected.";
+     document.getElementById("singleEditorEmpty").classList.remove("hidden");
+     document.getElementById("singleEditorForm").classList.add("hidden");
+     document.getElementById("singleEditorEmpty").innerText = "Select one feature to edit it here.";
+     return;
+   }
+-  const names = selectedIds.map(id => itemsById[id].item_id).join(", ");
++  const names = selectedIds.map(id => escapeHtml(itemsById[id]?.item_id || id)).join(", ");
+   document.getElementById("selectionSummary").innerHTML = `<strong>${selectedIds.length}</strong> selected: ${names}`;
+   if (selectedIds.length === 1){
+     const item = itemsById[selectedIds[0]];
+@@ -939,18 +990,18 @@
+ document.getElementById("statusFilter").addEventListener("change", applyFilters);
+ fetch(`/project/${projectId}/map_data`).then(r => r.json()).then(data => {
+   const items = data.items || [];
+-  const hadSavedView = !!(savedCenter && savedZoom);
++  const hadSavedView = restoredMapView;
+   items.forEach(item => {
+     itemsById[item.id] = item;
+     if (item.geometry_type === "Point" && Array.isArray(item.coords)) {
+       const marker = L.marker(item.coords, { icon: svgIcon(item, false), keyboard: false, bubblingMouseEvents: false }).addTo(featureLayer);
+-      if (map.getZoom() >= 15) marker.bindTooltip(item.item_id, { permanent: true, direction: 'right', offset: [12,0], className: 'map-label' });
++      if (map.getZoom() >= 15) marker.bindTooltip(escapeHtml(item.item_id), { permanent: true, direction: 'right', offset: [12,0], className: 'map-label' });
+       marker.on('click', e => { L.DomEvent.stopPropagation(e); toggleSelect(item.id); });
+       pointLayerById[item.id] = marker;
+-    } else if (item.geometry_type === "LineString" && Array.isArray(item.coords)) {
++    } else if (item.geometry_type === "LineString" && Array.isArray(item.coords) && item.coords.length) {
+       const line = L.polyline(item.coords, lineStyle(item, false)).addTo(featureLayer);
+       const center = line.getBounds().getCenter();
+-      const label = L.marker(center, { icon: L.divIcon({ className:'line-label-icon', html:`<div class="line-label-text">${item.item_id}</div>` }), keyboard:false, bubblingMouseEvents:false }).addTo(featureLayer);
++      const label = L.marker(center, { icon: L.divIcon({ className:'line-label-icon', html:`<div class="line-label-text">${escapeHtml(item.item_id)}</div>` }), keyboard:false, bubblingMouseEvents:false }).addTo(featureLayer);
+       line.on('click', e => { L.DomEvent.stopPropagation(e); toggleSelect(item.id); });
+       label.on('click', e => { L.DomEvent.stopPropagation(e); toggleSelect(item.id); });
+       lineLayerById[item.id] = line; labelLayerById[item.id] = label;
+@@ -961,7 +1012,7 @@
+     const showLabels = map.getZoom() >= 15;
+     Object.keys(pointLayerById).forEach(id => {
+       const marker = pointLayerById[id];
+-      if (showLabels) { if (!marker.getTooltip()) marker.bindTooltip(itemsById[id].item_id, { permanent:true, direction:'right', offset:[12,0], className:'map-label' }); }
++      if (showLabels) { if (!marker.getTooltip()) marker.bindTooltip(escapeHtml(itemsById[id].item_id), { permanent:true, direction:'right', offset:[12,0], className:'map-label' }); }
+       else { if (marker.getTooltip()) marker.unbindTooltip(); }
+     });
+     Object.keys(labelLayerById).forEach(id => { if (showLabels) labelLayerById[id].addTo(featureLayer); else featureLayer.removeLayer(labelLayerById[id]); });
