@@ -1,6 +1,7 @@
 name: Apply Codex Patch
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - ".codex_patches/*.patch"
@@ -17,17 +18,21 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Apply latest Codex patch
+      - name: Apply Codex patches
         shell: bash
         run: |
           set -euo pipefail
-          patch_file="$(ls -t .codex_patches/*.patch 2>/dev/null | head -n 1 || true)"
-          if [ -z "$patch_file" ]; then
-            echo "No Codex patch file found. Nothing to apply."
+          shopt -s nullglob
+          patch_files=(.codex_patches/*.patch)
+          if [ ${#patch_files[@]} -eq 0 ]; then
+            echo "No Codex patch files found. Nothing to apply."
             exit 0
           fi
-          git apply --whitespace=fix "$patch_file"
-          rm "$patch_file"
+          for patch_file in "${patch_files[@]}"; do
+            echo "Applying $patch_file"
+            git apply --whitespace=fix "$patch_file"
+            rm "$patch_file"
+          done
           rmdir .codex_patches 2>/dev/null || true
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -36,5 +41,5 @@ jobs:
             echo "Patch made no changes."
             exit 0
           fi
-          git commit -m "Apply fieldwork depth and map update"
+          git commit -m "Apply fieldwork overnight polish"
           git push
