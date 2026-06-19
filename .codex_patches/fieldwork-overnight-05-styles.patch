@@ -1,0 +1,31 @@
+diff --git a/fieldwork_app_review_copy/static/styles.css b/fieldwork_app_review_copy/static/styles.css
+--- a/fieldwork_app_review_copy/static/styles.css
++++ b/fieldwork_app_review_copy/static/styles.css
+@@ -30,6 +30,7 @@
+ input[type="checkbox"] { width: 18px; min-width: 18px; height: 18px; min-height: 18px; padding: 0; border-radius: 4px; vertical-align: middle; }
+ textarea { resize: vertical; }
+ button, .button { background: linear-gradient(135deg, #2563eb, #1d4ed8); color: white; border: none; cursor: pointer; text-decoration: none; display: inline-block; width: auto; padding: 10px 14px; border-radius: 10px; }
++button:disabled, .button.disabled { opacity: 0.45; cursor: not-allowed; filter: grayscale(0.25); }
+ .button.secondary { background: #e5e7eb; color: #111827; }
+ .danger { background: linear-gradient(135deg, #ef4444, #dc2626); }
+ .small { padding: 8px 10px; font-size: 13px; }
+@@ -876,3 +877,19 @@
+   min-height: 18px;
+   padding: 0;
+ }
++.stable-table input[type="checkbox"],
++table input[type="checkbox"] {
++  display: inline-block;
++  width: 16px;
++  min-width: 16px;
++  height: 16px;
++  min-height: 16px;
++}
++.calendar-drag-toggle {
++  width: auto;
++  padding: 6px 10px;
++  min-height: 30px;
++  border-radius: 999px;
++  background: #f8fafc;
++  border: 1px solid #dbe4f0;
++}
