@@ -233,6 +233,26 @@ def parse_date(s):
 def fmt_date(d):
     return d.strftime("%Y-%m-%d") if d else ""
 
+def date_range_error(label, start_s, end_s):
+    start = parse_date(start_s)
+    end = parse_date(end_s)
+    if start and end and end < start:
+        return f"{label} end date cannot be before the start date."
+    return ""
+
+def validate_project_date_ranges(form):
+    checks = [
+        ("Borehole", "borehole_start_date", "borehole_end_date"),
+        ("CPTU", "cptu_start_date", "cptu_end_date"),
+        ("Test Pit", "test_pit_start_date", "test_pit_end_date"),
+        ("Geophysics", "geophysics_start_date", "geophysics_end_date"),
+    ]
+    for label, start_field, end_field in checks:
+        error = date_range_error(label, form.get(start_field, "").strip(), form.get(end_field, "").strip())
+        if error:
+            return error
+    return ""
+
 def parse_int(value, default, min_value=None, max_value=None):
     try:
         out = int(value)
@@ -265,6 +285,38 @@ def parse_custom_methods(raw):
             return out
     except Exception:
         pass
+    return []
+
+def valid_point_coords(coords):
+    return (
+        isinstance(coords, list)
+        and len(coords) >= 2
+        and isinstance(coords[0], (int, float))
+        and isinstance(coords[1], (int, float))
+    )
+
+def valid_line_coords(coords):
+    return (
+        isinstance(coords, list)
+        and len(coords) >= 2
+        and all(valid_point_coords(c) for c in coords)
+    )
+
+def coords_for_geometry(coords_json, geometry_type):
+    try:
+        coords = json.loads(coords_json or "")
+    except Exception:
+        coords = None
+    if geometry_type == "Point":
+        if valid_point_coords(coords):
+            return coords
+        if isinstance(coords, list) and coords and valid_point_coords(coords[0]):
+            return coords[0]
+        return [0.0, 0.0]
+    if valid_line_coords(coords):
+        return coords
+    if valid_point_coords(coords):
+        return []
     return []
 
 
@@ -448,16 +500,19 @@ def depth_planned(item):
 
 def item_meter_budget(rows):
     planned_total = round(sum(depth_planned(x) for x in rows), 2)
+    drilled_rows = [x for x in rows if depth_actual(x) > 0]
+    planned_started_total = round(sum(depth_planned(x) for x in drilled_rows), 2)
     actual_total = round(sum(depth_actual(x) for x in rows if depth_actual(x) > 0), 2)
     completed_actual = round(sum(depth_actual(x) for x in rows if x.get("status") == "Completed" and depth_actual(x) > 0), 2)
-    remaining_to_plan = round(sum(max(depth_planned(x) - depth_actual(x), 0.0) for x in rows), 2)
-    over_drilled = round(sum(max(depth_actual(x) - depth_planned(x), 0.0) for x in rows if depth_planned(x) > 0), 2)
+    remaining_to_plan = round(sum(max(depth_planned(x) - depth_actual(x), 0.0) for x in drilled_rows), 2)
+    over_drilled = round(sum(max(depth_actual(x) - depth_planned(x), 0.0) for x in drilled_rows if depth_planned(x) > 0), 2)
     no_plan_actual = round(sum(depth_actual(x) for x in rows if depth_actual(x) > 0 and depth_planned(x) <= 0), 2)
-    net_bank = round(planned_total - actual_total, 2)
+    net_bank = round(planned_started_total - actual_total, 2)
     planned_count = sum(1 for x in rows if depth_planned(x) > 0)
     drilled_count = sum(1 for x in rows if depth_actual(x) > 0)
     return {
         "planned_item_meters": planned_total,
+        "planned_started_meters": planned_started_total,
         "actual_drilled_meters": actual_total,
         "completed_meters": completed_actual,
         "remaining_to_planned_depth": remaining_to_plan,
@@ -521,10 +576,7 @@ def item_dict(row):
     d["depth_m"] = safe_float(d.get("depth_m"))
     d["exclude_from_history"] = int(safe_float(d.get("exclude_from_history")))
     d["status_color"] = STATUS_COLORS.get(d["status"], "gray")
-    try:
-        d["coords"] = json.loads(d["coords_json"])
-    except Exception:
-        d["coords"] = None
+    d["coords"] = coords_for_geometry(d.get("coords_json"), d.get("geometry_type"))
     return normalize_item_dates(d)
 
 def project_items(conn, pid):
@@ -676,10 +728,15 @@ def percentile(values, pct):
     weight = pos - lower
     return round(values[lower] + (values[upper] - values[lower]) * weight, 2)
 
-def build_historical_rate_rows(conn):
-    projects = {r["id"]: dict(r) for r in conn.execute("SELECT * FROM projects").fetchall()}
+def build_historical_rate_rows(conn, project_id=None):
+    if project_id is None:
+        projects = {r["id"]: dict(r) for r in conn.execute("SELECT * FROM projects").fetchall()}
+        item_rows = conn.execute("SELECT * FROM map_items WHERE status='Completed' AND COALESCE(exclude_from_history, 0)=0 ORDER BY item_type, item_id").fetchall()
+    else:
+        projects = {r["id"]: dict(r) for r in conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchall()}
+        item_rows = conn.execute("SELECT * FROM map_items WHERE project_id=? AND status='Completed' AND COALESCE(exclude_from_history, 0)=0 ORDER BY item_type, item_id", (project_id,)).fetchall()
     rows = []
-    for row in conn.execute("SELECT * FROM map_items WHERE status='Completed' AND COALESCE(exclude_from_history, 0)=0 ORDER BY item_type, item_id").fetchall():
+    for row in item_rows:
         item = item_dict(row)
         project = projects.get(item["project_id"], {})
         days = item_work_days(item, project)
@@ -703,10 +760,13 @@ def build_historical_rate_rows(conn):
         })
     return rows
 
-def sync_historical_rates(conn):
-    rows = build_historical_rate_rows(conn)
+def sync_historical_rates(conn, project_id=None):
+    rows = build_historical_rate_rows(conn, project_id)
     now = datetime.now().isoformat(timespec="seconds")
-    conn.execute("DELETE FROM historical_rates")
+    if project_id is None:
+        conn.execute("DELETE FROM historical_rates")
+    else:
+        conn.execute("DELETE FROM historical_rates WHERE project_id=?", (project_id,))
     for row in rows:
         conn.execute("""
             INSERT INTO historical_rates
@@ -721,9 +781,13 @@ def sync_historical_rates(conn):
     conn.commit()
     return rows
 
-def historical_rate_dataset(conn):
+def historical_rate_dataset(conn, project_id=None):
     rows = []
-    for row in conn.execute("SELECT * FROM historical_rates ORDER BY item_type, completion_month, item_id").fetchall():
+    if project_id is None:
+        source_rows = conn.execute("SELECT * FROM historical_rates ORDER BY item_type, completion_month, item_id").fetchall()
+    else:
+        source_rows = conn.execute("SELECT * FROM historical_rates WHERE project_id=? ORDER BY item_type, completion_month, item_id", (project_id,)).fetchall()
+    for row in source_rows:
         d = dict(row)
         d.pop("id", None)
         d.pop("recorded_at", None)
@@ -1016,6 +1080,9 @@ def index():
 
 @app.route("/add_project", methods=["POST"])
 def add_project():
+    date_error = validate_project_date_ranges(request.form)
+    if date_error:
+        return redirect(url_for("index", error=date_error))
     custom_methods = []
     extra_names = request.form.getlist("custom_method_name")
     extra_colors = request.form.getlist("custom_method_color")
@@ -1050,7 +1117,6 @@ def add_project():
         safe_float(request.form.get("geophysics_budget_meters")),
     ))
     conn.commit()
-    sync_historical_rates(conn)
     conn.close()
     return redirect(url_for("index"))
 
@@ -1081,7 +1147,7 @@ def import_project_json():
                 insert_project_item_record(conn, new_pid, item)
                 imported_count += 1
         conn.commit()
-        sync_historical_rates(conn)
+        sync_historical_rates(conn, new_pid)
     finally:
         conn.close()
     return redirect(url_for("project", pid=new_pid, tab="overview", notice=f"Imported project with {imported_count} items."))
@@ -1143,7 +1209,7 @@ def budget_data(pid):
 @app.route("/project/<int:pid>/budget_history.csv")
 def budget_history_csv(pid):
     conn = get_db()
-    rows = historical_rate_dataset(conn)
+    rows = historical_rate_dataset(conn, pid)
     conn.close()
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=[
@@ -1196,6 +1262,9 @@ def update_plan_bar(pid):
     start_date = request.form.get("start_date", "").strip()
     end_date = request.form.get("end_date", "").strip()
     include_saturday = 1 if request.form.get("include_saturday") else 0
+    date_error = date_range_error(f"{method_name or 'Planned'}", start_date, end_date)
+    if date_error:
+        return redirect(url_for("project", pid=pid, tab="calendar", error=date_error))
 
     conn = get_db()
     row = conn.execute("SELECT * FROM projects WHERE id=?", (pid,)).fetchone()
@@ -1214,7 +1283,7 @@ def update_plan_bar(pid):
         params.append(pid)
         conn.execute(f'UPDATE projects SET {", ".join(updates)} WHERE id=?', params)
         conn.commit()
-        sync_historical_rates(conn)
+        sync_historical_rates(conn, pid)
     conn.close()
     return redirect(url_for("project", pid=pid, tab="calendar"))
 @app.route("/project/<int:pid>/map_data")
@@ -1264,7 +1333,7 @@ def import_kml(pid):
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
         (pid, item["item_type"], item_id, item["geometry_type"], item["coords_json"], item["location_plan"], normalize_planned_amount(item.get("planned_amount")), item["status"], item["work_start_date"], item["work_end_date"], item["notes"], 0.0))
     conn.commit()
-    sync_historical_rates(conn)
+    sync_historical_rates(conn, pid)
     conn.close()
     mode_text = "Replaced map data with" if replace_existing else "Added"
     suffix = f" {renamed} duplicate IDs were renamed." if renamed else ""
@@ -1305,7 +1374,7 @@ def place_item(pid):
         safe_float(request.form.get("depth_m")),
     ))
     conn.commit()
-    sync_historical_rates(conn)
+    sync_historical_rates(conn, pid)
     conn.close()
     return jsonify({"ok": True, "item_id": item_id})
 
@@ -1319,17 +1388,19 @@ def restore_import_backup(pid, backup_id):
     if not backup:
         conn.close()
         return redirect(url_for("project", pid=pid, tab="map", error="Backup not found."))
+    try:
+        rows = json.loads(backup["backup_json"])
+        if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+            raise ValueError("Backup data is not a valid map item list.")
+    except Exception:
+        conn.close()
+        return redirect(url_for("project", pid=pid, tab="map", error="Backup could not be restored because the saved backup data is invalid."))
+
     current = [dict(r) for r in conn.execute("SELECT * FROM map_items WHERE project_id=?", (pid,)).fetchall()]
     conn.execute(
         "INSERT INTO import_backups (project_id, created_at, item_count, backup_json) VALUES (?, ?, ?, ?)",
         (pid, datetime.now().isoformat(timespec="seconds"), len(current), json.dumps(current))
     )
-    try:
-        rows = json.loads(backup["backup_json"])
-        if not isinstance(rows, list):
-            rows = []
-    except Exception:
-        rows = []
     conn.execute("DELETE FROM map_items WHERE project_id=?", (pid,))
     for row in rows:
         conn.execute("""INSERT INTO map_items
@@ -1350,7 +1421,7 @@ def restore_import_backup(pid, backup_id):
             int(safe_float(row.get("exclude_from_history"))),
         ))
     conn.commit()
-    sync_historical_rates(conn)
+    sync_historical_rates(conn, pid)
     conn.close()
     return redirect(url_for("project", pid=pid, tab="map", notice=f"Restored backup with {len(rows)} items. Current map data was backed up first."))
 
@@ -1370,12 +1441,16 @@ def add_item(pid):
     work_end = request.form.get("work_end_date","").strip()
     if is_single_day_type(item_type) and work_start and not work_end:
         work_end = work_start
+    date_error = date_range_error("Work", work_start, work_end)
+    if date_error:
+        conn.close()
+        return redirect(url_for("project", pid=pid, tab="data", error=date_error))
     conn.execute("""INSERT INTO map_items
     (project_id,item_type,item_id,geometry_type,coords_json,location_plan,planned_amount,status,work_start_date,work_end_date,notes,depth_m)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
     (pid, item_type, request.form.get("item_id","").strip(), geometry_type, coords_json, request.form.get("location_plan","").strip(), safe_float(request.form.get("planned_amount")), clean_status(request.form.get("status")), work_start, work_end, request.form.get("notes","").strip(), safe_float(request.form.get("depth_m"))))
     conn.commit()
-    sync_historical_rates(conn)
+    sync_historical_rates(conn, pid)
     conn.close()
     return redirect(url_for("project", pid=pid, tab="data"))
 
@@ -1403,14 +1478,14 @@ def mass_add(pid):
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             (pid, item_type, f"{prefix}{i:02d}", geometry_type, coords_json, "", default_planned, status, "", "", "", 0.0))
         conn.commit()
-        sync_historical_rates(conn)
+        sync_historical_rates(conn, pid)
     conn.close()
     return redirect(url_for("project", pid=pid, tab="data"))
 
 @app.route("/item/<int:item_id>/update", methods=["POST"])
 def update_item(item_id):
     conn = get_db()
-    row = conn.execute("SELECT project_id, item_type FROM map_items WHERE id=?", (item_id,)).fetchone()
+    row = conn.execute("SELECT project_id, item_type, coords_json FROM map_items WHERE id=?", (item_id,)).fetchone()
     if not row:
         conn.close(); return redirect(url_for("index"))
     pid = row["project_id"]
@@ -1422,17 +1497,22 @@ def update_item(item_id):
     work_end = request.form.get("work_end_date","").strip()
     if is_single_day_type(item_type or row["item_type"]) and work_start and not work_end:
         work_end = work_start
+    date_error = date_range_error("Work", work_start, work_end)
+    if date_error:
+        conn.close()
+        return redirect(url_for("project", pid=pid, tab=request.form.get("next_tab","map"), year=request.form.get("year"), month=request.form.get("month"), error=date_error))
     if item_type:
         geometry_type = geometry_type_for_item_type(project, item_type)
+        coords_json = json.dumps(coords_for_geometry(row["coords_json"], geometry_type))
         conn.execute("""UPDATE map_items SET
-        item_type=?, geometry_type=?, item_id=?, location_plan=?, planned_amount=?, status=?, work_start_date=?, work_end_date=?, notes=?, depth_m=? WHERE id=?""",
-        (item_type, geometry_type, request.form.get("item_id","").strip(), request.form.get("location_plan","").strip(), safe_float(request.form.get("planned_amount")), clean_status(request.form.get("status")), work_start, work_end, request.form.get("notes","").strip(), safe_float(request.form.get("depth_m")), item_id))
+        item_type=?, geometry_type=?, coords_json=?, item_id=?, location_plan=?, planned_amount=?, status=?, work_start_date=?, work_end_date=?, notes=?, depth_m=? WHERE id=?""",
+        (item_type, geometry_type, coords_json, request.form.get("item_id","").strip(), request.form.get("location_plan","").strip(), safe_float(request.form.get("planned_amount")), clean_status(request.form.get("status")), work_start, work_end, request.form.get("notes","").strip(), safe_float(request.form.get("depth_m")), item_id))
     else:
         conn.execute("""UPDATE map_items SET
         item_id=?, location_plan=?, planned_amount=?, status=?, work_start_date=?, work_end_date=?, notes=?, depth_m=? WHERE id=?""",
         (request.form.get("item_id","").strip(), request.form.get("location_plan","").strip(), safe_float(request.form.get("planned_amount")), clean_status(request.form.get("status")), work_start, work_end, request.form.get("notes","").strip(), safe_float(request.form.get("depth_m")), item_id))
     conn.commit()
-    sync_historical_rates(conn)
+    sync_historical_rates(conn, pid)
     conn.close()
     return redirect(url_for("project", pid=pid, tab=request.form.get("next_tab","map"), year=request.form.get("year"), month=request.form.get("month")))
 
@@ -1453,16 +1533,32 @@ def quick_update(item_id):
         value = safe_float(value)
     if field == "status":
         value = clean_status(value)
+    if field in {"work_start_date", "work_end_date"}:
+        work_start = value if field == "work_start_date" else row["work_start_date"]
+        work_end = value if field == "work_end_date" else row["work_end_date"]
+        if is_single_day_type(row["item_type"]) and work_start and not work_end:
+            work_end = work_start
+        date_error = date_range_error("Work", work_start, work_end)
+        if date_error:
+            conn.close()
+            return jsonify({"ok": False, "error": date_error}), 400
+        if field == "work_start_date" and is_single_day_type(row["item_type"]) and value and not row["work_end_date"]:
+            conn.execute("UPDATE map_items SET work_start_date=?, work_end_date=? WHERE id=?", (work_start, work_end, item_id))
+            conn.commit()
+            sync_historical_rates(conn, row["project_id"])
+            conn.close()
+            return jsonify({"ok": True})
     if field == "item_type":
         prow = conn.execute("SELECT * FROM projects WHERE id=?", (row["project_id"],)).fetchone()
         project = dict(prow) if prow else {}
         project["custom_methods"] = parse_custom_methods(project.get("custom_methods_json", "[]"))
         geometry_type = geometry_type_for_item_type(project, value)
-        conn.execute("UPDATE map_items SET item_type=?, geometry_type=? WHERE id=?", (value, geometry_type, item_id))
+        coords_json = json.dumps(coords_for_geometry(row["coords_json"], geometry_type))
+        conn.execute("UPDATE map_items SET item_type=?, geometry_type=?, coords_json=? WHERE id=?", (value, geometry_type, coords_json, item_id))
     else:
         conn.execute(f"UPDATE map_items SET {field}=? WHERE id=?", (value, item_id))
     conn.commit()
-    sync_historical_rates(conn)
+    sync_historical_rates(conn, row["project_id"])
     conn.close()
     return jsonify({"ok": True})
 
@@ -1518,7 +1614,7 @@ def adjust_dates(item_id):
         end = start
     conn.execute("UPDATE map_items SET work_start_date=?, work_end_date=? WHERE id=?", (fmt_date(start), fmt_date(end), item_id))
     conn.commit()
-    sync_historical_rates(conn)
+    sync_historical_rates(conn, row["project_id"])
     conn.close()
     return jsonify({"ok": True, "work_start_date": fmt_date(start), "work_end_date": fmt_date(end)})
 
@@ -1532,7 +1628,7 @@ def toggle_history_exclusion(item_id):
     new_value = 0 if int(safe_float(row["exclude_from_history"])) else 1
     conn.execute("UPDATE map_items SET exclude_from_history=? WHERE id=?", (new_value, item_id))
     conn.commit()
-    sync_historical_rates(conn)
+    sync_historical_rates(conn, row["project_id"])
     conn.close()
     return redirect(url_for("project", pid=row["project_id"], tab="data"))
 
@@ -1546,11 +1642,16 @@ def bulk_update(pid):
     if selected:
         placeholders = ",".join("?" for _ in selected)
         if action == "delete":
+            existing = [dict(r) for r in conn.execute("SELECT * FROM map_items WHERE project_id=?", (pid,)).fetchall()]
+            conn.execute(
+                "INSERT INTO import_backups (project_id, created_at, item_count, backup_json) VALUES (?, ?, ?, ?)",
+                (pid, datetime.now().isoformat(timespec="seconds"), len(existing), json.dumps(existing)),
+            )
             conn.execute(f"DELETE FROM map_items WHERE project_id=? AND id IN ({placeholders})", [pid] + selected)
         elif action == "status" and new_status:
             conn.execute(f"UPDATE map_items SET status=? WHERE project_id=? AND id IN ({placeholders})", [new_status, pid] + selected)
         conn.commit()
-        sync_historical_rates(conn)
+        sync_historical_rates(conn, pid)
     conn.close()
     return redirect(url_for("project", pid=pid, tab="data"))
 
@@ -1565,12 +1666,16 @@ def bulk_map_status(pid):
     status = clean_status(request.form.get("status"), default="")
     work_start = request.form.get("work_start_date", "").strip()
     work_end = request.form.get("work_end_date", "").strip()
+    if work_start and work_end:
+        date_error = date_range_error("Work", work_start, work_end)
+        if date_error:
+            return redirect(url_for("project", pid=pid, tab="map", error=date_error))
 
     if selected:
         conn = get_db()
         placeholders = ",".join("?" for _ in selected)
         rows = conn.execute(
-            f"SELECT id, item_type FROM map_items WHERE project_id=? AND id IN ({placeholders})",
+            f"SELECT id, item_type, work_start_date, work_end_date FROM map_items WHERE project_id=? AND id IN ({placeholders})",
             [pid] + selected
         ).fetchall()
 
@@ -1578,19 +1683,31 @@ def bulk_map_status(pid):
             this_end = work_end
             if row["item_type"] == "Test Pit" and work_start and not this_end:
                 this_end = work_start
+            final_start = work_start or row["work_start_date"]
+            final_end = this_end or row["work_end_date"]
+            date_error = date_range_error("Work", final_start, final_end)
+            if date_error:
+                conn.close()
+                return redirect(url_for("project", pid=pid, tab="map", error=date_error))
 
+            updates = []
+            params = []
             if status in ITEM_STATUSES:
+                updates.append("status=?")
+                params.append(status)
+            if work_start:
+                updates.append("work_start_date=?")
+                params.append(work_start)
+            if this_end:
+                updates.append("work_end_date=?")
+                params.append(this_end)
+            if updates:
                 conn.execute(
-                    "UPDATE map_items SET status=?, work_start_date=?, work_end_date=? WHERE project_id=? AND id=?",
-                    (status, work_start, this_end, pid, row["id"])
-                )
-            else:
-                conn.execute(
-                    "UPDATE map_items SET work_start_date=?, work_end_date=? WHERE project_id=? AND id=?",
-                    (work_start, this_end, pid, row["id"])
+                    f"UPDATE map_items SET {', '.join(updates)} WHERE project_id=? AND id=?",
+                    params + [pid, row["id"]]
                 )
         conn.commit()
-        sync_historical_rates(conn)
+        sync_historical_rates(conn, pid)
         conn.close()
 
     return redirect(url_for("project", pid=pid, tab="map"))
@@ -1625,7 +1742,7 @@ def delete_map_items(pid):
     conn.execute(f"DELETE FROM map_items WHERE project_id=? AND id IN ({placeholders})", [pid] + selected)
     deleted_count = len(matching)
     conn.commit()
-    sync_historical_rates(conn)
+    sync_historical_rates(conn, pid)
     conn.close()
     return redirect(url_for("project", pid=pid, tab="map", notice=f"Deleted {deleted_count} map feature(s). A restore backup was saved."))
 
@@ -1638,6 +1755,10 @@ def edit_project(pid):
     if not row:
         conn.close(); return redirect(url_for("index"))
     if request.method == "POST":
+        date_error = validate_project_date_ranges(request.form)
+        if date_error:
+            conn.close()
+            return redirect(url_for("edit_project", pid=pid, error=date_error))
         custom_methods = []
         extra_names = request.form.getlist("custom_method_name")
         extra_colors = request.form.getlist("custom_method_color")
@@ -1672,7 +1793,7 @@ def edit_project(pid):
             pid
         ))
         conn.commit()
-        sync_historical_rates(conn)
+        sync_historical_rates(conn, pid)
         conn.close()
         return redirect(url_for("project", pid=pid, tab="overview"))
     project = dict(row)
@@ -1689,7 +1810,6 @@ def delete_project(pid):
     conn.execute("DELETE FROM historical_rates WHERE project_id=?", (pid,))
     conn.execute("DELETE FROM projects WHERE id=?", (pid,))
     conn.commit()
-    sync_historical_rates(conn)
     conn.close()
     return redirect(url_for("index"))
 
